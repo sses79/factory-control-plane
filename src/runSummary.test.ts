@@ -1,0 +1,125 @@
+import { describe, expect, it } from 'vitest';
+
+import { RunSummarySchema, toRunSummary } from './runSummary.js';
+
+describe('toRunSummary', () => {
+  const baseRun = {
+    run_id: 'run_123',
+    feature_id: 'feature_abc',
+    target_repository: 'acme/control',
+    state: 'BUILDING',
+    created_at: '2026-09-13T09:00:00.000Z',
+    updated_at: '2026-09-13T09:05:00.000Z',
+  } as const;
+
+  it('summarizes an in-flight run with one ACTIVE attempt and no finished_at', () => {
+    const summary = toRunSummary(
+      { ...baseRun, state: 'BUILDING' },
+      {
+        attempts: [
+          {
+            attempt_id: 'attempt_1',
+            ordinal: 1,
+            status: 'ACTIVE',
+            started_at: '2026-09-13T09:01:00.000Z',
+          },
+        ],
+      },
+    );
+
+    expect(summary.attempt_count).toBe(1);
+    expect(summary.started_at).toBe('2026-09-13T09:01:00.000Z');
+    expect(summary).not.toHaveProperty('finished_at');
+    expect(RunSummarySchema.parse(summary)).toEqual(summary);
+  });
+
+  it('uses the latest attempt finished_at for a terminal DONE run', () => {
+    const summary = toRunSummary(
+      { ...baseRun, state: 'DONE' },
+      {
+        attempts: [
+          {
+            attempt_id: 'attempt_1',
+            ordinal: 1,
+            status: 'COMPLETED',
+            started_at: '2026-09-13T09:01:00.000Z',
+            finished_at: '2026-09-13T09:10:00.000Z',
+          },
+          {
+            attempt_id: 'attempt_2',
+            ordinal: 2,
+            status: 'COMPLETED',
+            started_at: '2026-09-13T09:11:00.000Z',
+            finished_at: '2026-09-13T09:15:00.000Z',
+          },
+        ],
+      },
+    );
+
+    expect(summary.attempt_count).toBe(2);
+    expect(summary.started_at).toBe('2026-09-13T09:01:00.000Z');
+    expect(summary.finished_at).toBe('2026-09-13T09:15:00.000Z');
+    expect(RunSummarySchema.parse(summary)).toEqual(summary);
+  });
+
+  it('carries terminal_reason through for a BLOCKED run', () => {
+    const summary = toRunSummary(
+      { ...baseRun, state: 'BLOCKED' },
+      {
+        attempts: [
+          {
+            attempt_id: 'attempt_1',
+            ordinal: 1,
+            status: 'FAILED',
+            started_at: '2026-09-13T09:01:00.000Z',
+            finished_at: '2026-09-13T09:02:00.000Z',
+          },
+        ],
+        terminal_reason: 'waiting on a maintainer review',
+      },
+    );
+
+    expect(summary.terminal_reason).toBe('waiting on a maintainer review');
+    expect(summary).not.toHaveProperty('finished_at');
+    expect(RunSummarySchema.parse(summary)).toEqual(summary);
+  });
+
+  it('omits started_at and finished_at when no attempt timing exists', () => {
+    const summary = toRunSummary({ ...baseRun, state: 'FAILED' }, { attempts: [] });
+
+    expect(summary.attempt_count).toBe(0);
+    expect(summary).not.toHaveProperty('started_at');
+    expect(summary).not.toHaveProperty('finished_at');
+    expect(RunSummarySchema.parse(summary)).toEqual(summary);
+  });
+
+  it('takes the earliest attempt started_at and includes branch metadata', () => {
+    const summary = toRunSummary(
+      { ...baseRun, state: 'AGENT_REVIEW' },
+      {
+        attempts: [
+          {
+            attempt_id: 'attempt_1',
+            ordinal: 1,
+            status: 'COMPLETED',
+            started_at: '2026-09-13T09:05:00.000Z',
+          },
+          {
+            attempt_id: 'attempt_2',
+            ordinal: 2,
+            status: 'ACTIVE',
+            started_at: '2026-09-13T09:03:00.000Z',
+          },
+        ],
+        branch: 'feat/read-model',
+        pull_request_url: 'https://github.com/acme/control/pull/42',
+      },
+    );
+
+    expect(summary.started_at).toBe('2026-09-13T09:03:00.000Z');
+    expect(summary.branch).toBe('feat/read-model');
+    expect(summary.pull_request_url).toBe('https://github.com/acme/control/pull/42');
+    expect(summary).not.toHaveProperty('finished_at');
+    expect(RunSummarySchema.parse(summary)).toEqual(summary);
+  });
+});
