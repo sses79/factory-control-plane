@@ -1,0 +1,76 @@
+version: 1
+repository: sses79/factory-control-plane
+default_branch: main
+
+context:
+  enabled: true
+  classification: public
+  allowed_targets:
+    - sses79/factory-control-plane
+  allowed_model_policies:
+    - codex-sdk-openrouter-public-readonly-live
+    - codex-sdk-openrouter-public-write-proposal-live
+    - claude-agent-sdk-openrouter-public-reviewer-live
+  denied_paths:
+    - .env
+    - .env.*
+    - "*.pem"
+    - "*.key"
+    - .git/**
+    - .github/**
+    - .factory/**
+  max_context_files: 32
+  max_context_file_bytes: 98304
+  max_context_bytes: 262144
+  allow_public_output: true
+
+paths:
+  writable:
+    - src/**
+    - README.md
+  denied:
+    - .env
+    - .env.*
+    - "*.pem"
+    - "*.key"
+    - .git/**
+    - .github/**
+    - .factory/**
+    - pnpm-lock.yaml
+
+commands:
+  typecheck:
+    argv:
+      - node_modules/.bin/tsc
+      - --noEmit
+    timeout_seconds: 120
+    idempotent: true
+    allowed_hosts: []
+    validation_kind: generic
+    evidence_outputs: []
+  test:
+    argv:
+      - node_modules/.bin/vitest
+      - run
+      - --dir
+      - src
+      - --maxWorkers=1
+    timeout_seconds: 300
+    idempotent: true
+    allowed_hosts: []
+    validation_kind: test
+    evidence_outputs: []
+
+required_checks:
+  - typecheck
+  - test
+
+environment:
+  allowed_variables: []
+
+network:
+  default: deny
+
+pull_request:
+  draft: true
+  auto_merge: false
