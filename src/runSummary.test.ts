@@ -122,4 +122,86 @@ describe('toRunSummary', () => {
     expect(summary).not.toHaveProperty('finished_at');
     expect(RunSummarySchema.parse(summary)).toEqual(summary);
   });
+
+  it('rejects a non-timestamp started_at', () => {
+    expect(() =>
+      RunSummarySchema.parse({
+        run_id: 'run_123',
+        feature_id: 'feature_abc',
+        target_repository: 'acme/control',
+        state: 'BUILDING',
+        attempt_count: 1,
+        started_at: 'not-a-timestamp',
+      }),
+    ).toThrow();
+  });
+
+  it('accepts an offset started_at', () => {
+    expect(
+      RunSummarySchema.parse({
+        run_id: 'run_123',
+        feature_id: 'feature_abc',
+        target_repository: 'acme/control',
+        state: 'BUILDING',
+        attempt_count: 1,
+        started_at: '2026-09-13T09:00:00+02:00',
+      }),
+    ).toMatchObject({
+      started_at: '2026-09-13T09:00:00+02:00',
+    });
+  });
+
+  it('returns the earlier instant for started_at regardless of offset', () => {
+    const summary = toRunSummary(
+      { ...baseRun, state: 'BUILDING' },
+      {
+        attempts: [
+          {
+            attempt_id: 'attempt_1',
+            ordinal: 1,
+            status: 'ACTIVE',
+            started_at: '2026-09-13T09:00:00+02:00',
+          },
+          {
+            attempt_id: 'attempt_2',
+            ordinal: 2,
+            status: 'ACTIVE',
+            started_at: '2026-09-13T08:00:00Z',
+          },
+        ],
+      },
+    );
+
+    expect(summary.started_at).toBe('2026-09-13T09:00:00+02:00');
+    expect(summary).not.toHaveProperty('finished_at');
+    expect(RunSummarySchema.parse(summary)).toEqual(summary);
+  });
+
+  it('returns the later instant for finished_at regardless of offset', () => {
+    const summary = toRunSummary(
+      { ...baseRun, state: 'DONE' },
+      {
+        attempts: [
+          {
+            attempt_id: 'attempt_1',
+            ordinal: 1,
+            status: 'COMPLETED',
+            started_at: '2026-09-13T09:01:00.000Z',
+            finished_at: '2026-09-13T08:00:00Z',
+          },
+          {
+            attempt_id: 'attempt_2',
+            ordinal: 2,
+            status: 'COMPLETED',
+            started_at: '2026-09-13T09:02:00.000Z',
+            finished_at: '2026-09-13T09:00:00+02:00',
+          },
+        ],
+      },
+    );
+
+    expect(summary.started_at).toBe('2026-09-13T09:01:00.000Z');
+    expect(summary.finished_at).toBe('2026-09-13T08:00:00Z');
+    expect(RunSummarySchema.parse(summary)).toEqual(summary);
+  });
 });

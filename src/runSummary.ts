@@ -37,8 +37,8 @@ export const RunSummarySchema = z.object({
   terminal_reason: z.string().optional(),
   branch: z.string().optional(),
   pull_request_url: z.string().optional(),
-  started_at: z.string().optional(),
-  finished_at: z.string().optional(),
+  started_at: z.iso.datetime({ offset: true }).optional(),
+  finished_at: z.iso.datetime({ offset: true }).optional(),
 });
 
 export type RunSummary = z.infer<typeof RunSummarySchema>;
@@ -75,10 +75,15 @@ const FINISHED_STATES: ReadonlySet<RunState> = new Set([
 
 function earliestStartedAt(attempts: Attempt[]): string | undefined {
   let earliest: string | undefined;
+  let earliestInstant = Number.POSITIVE_INFINITY;
   for (const attempt of attempts) {
     const startedAt = attempt.started_at;
-    if (startedAt !== undefined && (earliest === undefined || startedAt < earliest)) {
-      earliest = startedAt;
+    if (startedAt !== undefined) {
+      const instant = Date.parse(startedAt);
+      if (instant < earliestInstant) {
+        earliest = startedAt;
+        earliestInstant = instant;
+      }
     }
   }
   return earliest;
@@ -86,10 +91,15 @@ function earliestStartedAt(attempts: Attempt[]): string | undefined {
 
 function latestFinishedAt(attempts: Attempt[]): string | undefined {
   let latest: string | undefined;
+  let latestInstant = Number.NEGATIVE_INFINITY;
   for (const attempt of attempts) {
     const finishedAt = attempt.finished_at;
-    if (finishedAt !== undefined && (latest === undefined || finishedAt > latest)) {
-      latest = finishedAt;
+    if (finishedAt !== undefined) {
+      const instant = Date.parse(finishedAt);
+      if (instant > latestInstant) {
+        latest = finishedAt;
+        latestInstant = instant;
+      }
     }
   }
   return latest;
