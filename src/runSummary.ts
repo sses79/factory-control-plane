@@ -73,12 +73,26 @@ const FINISHED_STATES: ReadonlySet<RunState> = new Set([
   'CANCELLED',
 ]);
 
+function assertValidTimestamp(
+  attemptId: string,
+  property: 'started_at' | 'finished_at',
+  value: string,
+): void {
+  const result = z.iso.datetime({ offset: true }).safeParse(value);
+  if (!result.success) {
+    throw new Error(
+      `Attempt ${attemptId} has invalid ${property}: ${value}`,
+    );
+  }
+}
+
 function earliestStartedAt(attempts: Attempt[]): string | undefined {
   let earliest: string | undefined;
   let earliestInstant = Number.POSITIVE_INFINITY;
   for (const attempt of attempts) {
     const startedAt = attempt.started_at;
     if (startedAt !== undefined) {
+      assertValidTimestamp(attempt.attempt_id, 'started_at', startedAt);
       const instant = Date.parse(startedAt);
       if (instant < earliestInstant) {
         earliest = startedAt;
@@ -95,6 +109,7 @@ function latestFinishedAt(attempts: Attempt[]): string | undefined {
   for (const attempt of attempts) {
     const finishedAt = attempt.finished_at;
     if (finishedAt !== undefined) {
+      assertValidTimestamp(attempt.attempt_id, 'finished_at', finishedAt);
       const instant = Date.parse(finishedAt);
       if (instant > latestInstant) {
         latest = finishedAt;

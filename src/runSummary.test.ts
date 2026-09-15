@@ -204,4 +204,85 @@ describe('toRunSummary', () => {
     expect(summary.finished_at).toBe('2026-09-13T08:00:00Z');
     expect(RunSummarySchema.parse(summary)).toEqual(summary);
   });
+
+  it('throws for an invalid started_at and names the attempt and value', () => {
+    const build = () =>
+      toRunSummary(
+        { ...baseRun, state: 'BUILDING' },
+        {
+          attempts: [
+            {
+              attempt_id: 'attempt_invalid_start',
+              ordinal: 1,
+              status: 'ACTIVE',
+              started_at: 'not-a-timestamp',
+            },
+          ],
+        },
+      );
+
+    expect(build).toThrow(/attempt_invalid_start/);
+    expect(build).toThrow(/not-a-timestamp/);
+  });
+
+  it('throws for a started_at that Date.parse accepts but is not an ISO datetime', () => {
+    const build = () =>
+      toRunSummary(
+        { ...baseRun, state: 'BUILDING' },
+        {
+          attempts: [
+            {
+              attempt_id: 'attempt_short_year',
+              ordinal: 1,
+              status: 'ACTIVE',
+              started_at: '2026',
+            },
+          ],
+        },
+      );
+
+    expect(build).toThrow(/attempt_short_year/);
+    expect(build).toThrow(/2026/);
+  });
+
+  it('throws for an invalid finished_at on a DONE run and names the attempt and value', () => {
+    const build = () =>
+      toRunSummary(
+        { ...baseRun, state: 'DONE' },
+        {
+          attempts: [
+            {
+              attempt_id: 'attempt_invalid_finish',
+              ordinal: 1,
+              status: 'COMPLETED',
+              started_at: '2026-09-13T09:01:00.000Z',
+              finished_at: 'not-a-timestamp',
+            },
+          ],
+        },
+      );
+
+    expect(build).toThrow(/attempt_invalid_finish/);
+    expect(build).toThrow(/not-a-timestamp/);
+  });
+
+  it('accepts an attempt carrying neither started_at nor finished_at', () => {
+    const summary = toRunSummary(
+      { ...baseRun, state: 'BUILDING' },
+      {
+        attempts: [
+          {
+            attempt_id: 'attempt_pending',
+            ordinal: 1,
+            status: 'PENDING',
+          },
+        ],
+      },
+    );
+
+    expect(summary.attempt_count).toBe(1);
+    expect(summary).not.toHaveProperty('started_at');
+    expect(summary).not.toHaveProperty('finished_at');
+    expect(RunSummarySchema.parse(summary)).toEqual(summary);
+  });
 });
