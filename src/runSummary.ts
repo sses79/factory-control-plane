@@ -92,7 +92,6 @@ function earliestStartedAt(attempts: Attempt[]): string | undefined {
   for (const attempt of attempts) {
     const startedAt = attempt.started_at;
     if (startedAt !== undefined) {
-      assertValidTimestamp(attempt.attempt_id, 'started_at', startedAt);
       const instant = Date.parse(startedAt);
       if (instant < earliestInstant) {
         earliest = startedAt;
@@ -109,7 +108,6 @@ function latestFinishedAt(attempts: Attempt[]): string | undefined {
   for (const attempt of attempts) {
     const finishedAt = attempt.finished_at;
     if (finishedAt !== undefined) {
-      assertValidTimestamp(attempt.attempt_id, 'finished_at', finishedAt);
       const instant = Date.parse(finishedAt);
       if (instant > latestInstant) {
         latest = finishedAt;
@@ -121,6 +119,15 @@ function latestFinishedAt(attempts: Attempt[]): string | undefined {
 }
 
 export function toRunSummary(run: Run, options: RunOptions): RunSummary {
+  for (const attempt of options.attempts) {
+    if (attempt.started_at !== undefined) {
+      assertValidTimestamp(attempt.attempt_id, 'started_at', attempt.started_at);
+    }
+    if (attempt.finished_at !== undefined) {
+      assertValidTimestamp(attempt.attempt_id, 'finished_at', attempt.finished_at);
+    }
+  }
+
   const summary: RunSummary = {
     run_id: run.run_id,
     feature_id: run.feature_id,
