@@ -222,6 +222,7 @@ describe('toRunSummary', () => {
       );
 
     expect(build).toThrow(/attempt_invalid_start/);
+    expect(build).toThrow(/started_at/);
     expect(build).toThrow(/not-a-timestamp/);
   });
 
@@ -242,6 +243,7 @@ describe('toRunSummary', () => {
       );
 
     expect(build).toThrow(/attempt_short_year/);
+    expect(build).toThrow(/started_at/);
     expect(build).toThrow(/2026/);
   });
 
@@ -263,7 +265,51 @@ describe('toRunSummary', () => {
       );
 
     expect(build).toThrow(/attempt_invalid_finish/);
+    expect(build).toThrow(/finished_at/);
     expect(build).toThrow(/not-a-timestamp/);
+  });
+
+  it('throws for an invalid finished_at on a BUILDING run and names the attempt and value', () => {
+    const build = () =>
+      toRunSummary(
+        { ...baseRun, state: 'BUILDING' },
+        {
+          attempts: [
+            {
+              attempt_id: 'attempt_invalid_finish_building',
+              ordinal: 1,
+              status: 'ACTIVE',
+              started_at: '2026-09-13T09:01:00.000Z',
+              finished_at: 'not-a-timestamp',
+            },
+          ],
+        },
+      );
+
+    expect(build).toThrow(/attempt_invalid_finish_building/);
+    expect(build).toThrow(/finished_at/);
+    expect(build).toThrow(/not-a-timestamp/);
+  });
+
+  it('throws for an invalid started_at on a CANCELLED run and names the attempt and value', () => {
+    const build = () =>
+      toRunSummary(
+        { ...baseRun, state: 'CANCELLED' },
+        {
+          attempts: [
+            {
+              attempt_id: 'attempt_invalid_cancelled',
+              ordinal: 1,
+              status: 'CANCELLED',
+              started_at: '2026',
+            },
+          ],
+        },
+      );
+
+    expect(build).toThrow(/attempt_invalid_cancelled/);
+    expect(build).toThrow(/started_at/);
+    expect(build).toThrow(/2026/);
   });
 
   it('accepts an attempt carrying neither started_at nor finished_at', () => {
