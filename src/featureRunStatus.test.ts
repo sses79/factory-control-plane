@@ -241,6 +241,72 @@ describe('toFeatureRunStatus', () => {
 
     expect(runs).toEqual(before);
   });
+
+  it('throws when a supplied run has an unparseable started_at', () => {
+    const runs: RunSummary[] = [
+      makeRun({
+        run_id: 'r1',
+        feature_id: 'f1',
+        target_repository: 'repo-a',
+        state: 'DONE',
+        started_at: 'garbage',
+      }),
+    ];
+
+    expect(() => toFeatureRunStatus(feature, { runs })).toThrow(
+      'Run r1 has invalid started_at: garbage',
+    );
+  });
+
+  it('throws when a supplied run has a started_at that is not an ISO-8601 datetime', () => {
+    const runs: RunSummary[] = [
+      makeRun({
+        run_id: 'r1',
+        feature_id: 'f1',
+        target_repository: 'repo-a',
+        state: 'DONE',
+        started_at: '2026',
+      }),
+    ];
+
+    expect(() => toFeatureRunStatus(feature, { runs })).toThrow(
+      'Run r1 has invalid started_at: 2026',
+    );
+  });
+
+  it('still accepts a run without started_at', () => {
+    const runs: RunSummary[] = [
+      makeRun({
+        run_id: 'r1',
+        feature_id: 'f1',
+        target_repository: 'repo-a',
+        state: 'DONE',
+      }),
+    ];
+
+    const status = toFeatureRunStatus(feature, { runs });
+
+    expect(status.run_count).toBe(1);
+    expect(status.latest_run_state).toBe('DONE');
+    expect(status).not.toHaveProperty('latest_pull_request_url');
+    expect(FeatureRunStatusSchema.parse(status)).toEqual(status);
+  });
+
+  it('validates every supplied run even when it does not match the feature', () => {
+    const runs: RunSummary[] = [
+      makeRun({
+        run_id: 'r1',
+        feature_id: 'f2',
+        target_repository: 'repo-a',
+        state: 'DONE',
+        started_at: 'garbage',
+      }),
+    ];
+
+    expect(() => toFeatureRunStatus(feature, { runs })).toThrow(
+      'Run r1 has invalid started_at: garbage',
+    );
+  });
 });
 
 describe('FeatureRunStatusSchema', () => {

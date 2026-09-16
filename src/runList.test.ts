@@ -203,4 +203,46 @@ describe('toRunList', () => {
     expect(RunListSchema.parse(first)).toEqual(first);
     expect(RunListSchema.parse(second)).toEqual(second);
   });
+
+  it('throws when a supplied summary has an unparseable started_at', () => {
+    const summaries = [
+      summary({ run_id: 'run_1', started_at: 'garbage' }),
+    ];
+
+    expect(() => toRunList(summaries, {})).toThrow(
+      'Run run_1 has invalid started_at: garbage',
+    );
+  });
+
+  it('throws when a supplied summary has a started_at that is not an ISO-8601 datetime', () => {
+    const summaries = [
+      summary({ run_id: 'run_1', started_at: '2026' }),
+    ];
+
+    expect(() => toRunList(summaries, {})).toThrow(
+      'Run run_1 has invalid started_at: 2026',
+    );
+  });
+
+  it('still accepts summaries without started_at', () => {
+    const summaries = [
+      summary({ run_id: 'run_1' }),
+      summary({ run_id: 'run_2', started_at: '2026-09-16T10:00:00Z' }),
+    ];
+
+    const result = toRunList(summaries, {});
+
+    expect(result.runs.map((run) => run.run_id)).toEqual(['run_2', 'run_1']);
+    expect(RunListSchema.parse(result)).toEqual(result);
+  });
+
+  it('validates every supplied summary even when the state filter excludes it', () => {
+    const summaries = [
+      summary({ run_id: 'run_1', state: 'DONE', started_at: 'garbage' }),
+    ];
+
+    expect(() => toRunList(summaries, { state: 'BUILDING' })).toThrow(
+      'Run run_1 has invalid started_at: garbage',
+    );
+  });
 });
