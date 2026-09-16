@@ -43,10 +43,26 @@ function compareRuns(a: RunSummary, b: RunSummary): number {
   return a.run_id < b.run_id ? -1 : 1;
 }
 
+function assertValidStartedAt(run: RunSummary): void {
+  const startedAt = run.started_at;
+  if (startedAt !== undefined) {
+    const result = z.iso.datetime({ offset: true }).safeParse(startedAt);
+    if (!result.success) {
+      throw new Error(
+        `Run ${run.run_id} has invalid started_at: ${startedAt}`,
+      );
+    }
+  }
+}
+
 export function toFeatureRunStatus(
   feature: Feature,
   options: FeatureRunStatusOptions,
 ): FeatureRunStatus {
+  for (const run of options.runs) {
+    assertValidStartedAt(run);
+  }
+
   const matchingRuns = options.runs.filter(
     (run) =>
       run.feature_id === feature.feature_id &&

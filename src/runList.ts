@@ -38,10 +38,26 @@ function compareRuns(a: RunSummary, b: RunSummary): number {
   return a.run_id < b.run_id ? -1 : 1;
 }
 
+function assertValidStartedAt(summary: RunSummary): void {
+  const startedAt = summary.started_at;
+  if (startedAt !== undefined) {
+    const result = z.iso.datetime({ offset: true }).safeParse(startedAt);
+    if (!result.success) {
+      throw new Error(
+        `Run ${summary.run_id} has invalid started_at: ${startedAt}`,
+      );
+    }
+  }
+}
+
 export function toRunList(
   summaries: readonly RunSummary[],
   options: RunListOptions,
 ): RunList {
+  for (const summary of summaries) {
+    assertValidStartedAt(summary);
+  }
+
   const total = summaries.length;
 
   const byState: Record<string, number> = {};
