@@ -122,7 +122,13 @@ export function routeRequest(
       secondSegment !== undefined &&
       segments.length === 2
     ) {
-      return handleRunDetail(request, decodeURIComponent(secondSegment), sources);
+      let runId: string;
+      try {
+        runId = decodeURIComponent(secondSegment);
+      } catch {
+        return { status: 400, body: { error: 'invalid run id' } };
+      }
+      return handleRunDetail(request, runId, sources);
     }
 
     if (firstSegment === 'queue' && secondSegment === undefined) {
