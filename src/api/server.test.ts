@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it, vi, type Mock } from 'vitest';
 
+import { toRunList } from '../runList.js';
+import { renderDashboard } from '../ui/dashboard.js';
 import { routeRequest, type ReadSources } from './router.js';
 import {
   createReadSources,
@@ -275,6 +277,53 @@ describe('createRequestHandler', () => {
       'content-type': 'application/json; charset=utf-8',
     });
     expect(JSON.parse(response.body)).toEqual(expected.body);
+  });
+
+  it('writes HTML with its content-type, CSP and the raw dashboard body for GET /', () => {
+    const generatedAt = '2026-01-01T00:00:00.000Z';
+    const sources: ReadSources = {
+      listRunSummaries: () => [],
+      listQueueEntries: () => [],
+      now: () => new Date(generatedAt),
+    };
+    const handler = createRequestHandler(sources);
+    const response = makeResponse();
+
+    handler(
+      { method: 'GET', url: '/' } as unknown as IncomingMessage,
+      response as unknown as ServerResponse,
+    );
+
+    const expected = renderDashboard({
+      runs: toRunList([], {}),
+      queue: [],
+      generatedAt,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers).toEqual({
+      'content-type': 'text/html; charset=utf-8',
+      'content-security-policy':
+        "default-src 'none'; style-src 'unsafe-inline'",
+    });
+    expect(response.body).toBe(expected);
+  });
+
+  it('still writes JSON bodies with JSON.stringify for routes without a contentType', () => {
+    const { sources } = makeRunSources({ directories: ['run-1'] });
+    const handler = createRequestHandler(sources);
+    const response = makeResponse();
+
+    handler(
+      { method: 'GET', url: '/queue' } as unknown as IncomingMessage,
+      response as unknown as ServerResponse,
+    );
+
+    const expected = routeRequest({ method: 'GET', url: '/queue' }, sources);
+    expect(response.statusCode).toBe(expected.status);
+    expect(response.headers).toEqual({
+      'content-type': 'application/json; charset=utf-8',
+    });
+    expect(response.body).toBe(JSON.stringify(expected.body));
   });
 
   it('routes a request without a method as GET', () => {

@@ -2,15 +2,18 @@ import { toRunList, type RunListOptions } from '../runList.js';
 import type { RunSummary } from '../runSummary.js';
 import { toRunTrace } from '../runTrace.js';
 import type { QueueEntry } from '../state/queueDatabase.js';
+import { renderDashboard } from '../ui/dashboard.js';
 
 export interface ReadSources {
   listRunSummaries(): RunSummary[];
   listQueueEntries(): QueueEntry[];
+  now?: () => Date;
 }
 
 export interface ReadResponse {
   status: number;
   body: unknown;
+  contentType?: string;
 }
 
 function ok(body: unknown): ReadResponse {
@@ -96,6 +99,26 @@ function handleQueue(
   return ok({ total: entries.length, by_status: byStatus, entries });
 }
 
+function handleDashboard(
+  request: { method: string },
+  sources: ReadSources,
+): ReadResponse {
+  if (request.method !== 'GET') {
+    return methodNotAllowed();
+  }
+
+  const generatedAt = (sources.now ?? (() => new Date()))().toISOString();
+  return {
+    status: 200,
+    contentType: 'text/html; charset=utf-8',
+    body: renderDashboard({
+      runs: toRunList(sources.listRunSummaries(), {}),
+      queue: sources.listQueueEntries(),
+      generatedAt,
+    }),
+  };
+}
+
 export function routeRequest(
   request: { method: string; url: string },
   sources: ReadSources,
@@ -108,6 +131,10 @@ export function routeRequest(
   }
 
   try {
+    if (parsedUrl.pathname === '/') {
+      return handleDashboard(request, sources);
+    }
+
     const segments = parsedUrl.pathname
       .split('/')
       .filter((segment) => segment !== '');

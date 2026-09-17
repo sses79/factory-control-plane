@@ -70,13 +70,21 @@ export function createRequestHandler(
 ): (request: IncomingMessage, response: ServerResponse) => void {
   return (request, response) => {
     const routed = routeRequest(
-      { method: request.method ?? 'GET', url: request.url ?? '/' },
+      { method: request.method ?? 'GET', url: request.url ?? '/not-found' },
       sources,
     );
+    if (routed.contentType === undefined) {
+      response.writeHead(routed.status, {
+        'content-type': 'application/json; charset=utf-8',
+      });
+      response.end(JSON.stringify(routed.body));
+      return;
+    }
     response.writeHead(routed.status, {
-      'content-type': 'application/json; charset=utf-8',
+      'content-type': routed.contentType,
+      'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
     });
-    response.end(JSON.stringify(routed.body));
+    response.end(String(routed.body));
   };
 }
 
