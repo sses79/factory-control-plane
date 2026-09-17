@@ -137,6 +137,35 @@ describe('routeRequest', () => {
     expect(response.body).toEqual({ summary, trace: toRunTrace(summary, {}) });
   });
 
+  it('GET /runs/%zz returns 400 for an invalid run id', () => {
+    const response = routeRequest({ method: 'GET', url: '/runs/%zz' }, makeSources());
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'invalid run id' });
+  });
+
+  it('GET /runs/%zz does not call listRunSummaries or listQueueEntries', () => {
+    let listRunSummariesCalls = 0;
+    let listQueueEntriesCalls = 0;
+    const sources: ReadSources = {
+      listRunSummaries() {
+        listRunSummariesCalls += 1;
+        return [];
+      },
+      listQueueEntries() {
+        listQueueEntriesCalls += 1;
+        return [];
+      },
+    };
+
+    const response = routeRequest({ method: 'GET', url: '/runs/%zz' }, sources);
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'invalid run id' });
+    expect(listRunSummariesCalls).toBe(0);
+    expect(listQueueEntriesCalls).toBe(0);
+  });
+
   it('GET /runs/run-missing returns 404', () => {
     const response = routeRequest(
       { method: 'GET', url: '/runs/run-missing' },
