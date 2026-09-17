@@ -70,7 +70,7 @@ export function createRequestHandler(
 ): (request: IncomingMessage, response: ServerResponse) => void {
   return (request, response) => {
     const routed = routeRequest(
-      { method: request.method ?? 'GET', url: request.url ?? '/not-found' },
+      { method: request.method ?? 'GET', url: request.url ?? '/' },
       sources,
     );
     if (routed.contentType === undefined) {
