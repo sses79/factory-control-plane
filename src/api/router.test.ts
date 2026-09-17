@@ -4,6 +4,7 @@ import { toRunList } from '../runList.js';
 import type { RunSummary } from '../runSummary.js';
 import { toRunTrace } from '../runTrace.js';
 import type { QueueEntry } from '../state/queueDatabase.js';
+import { renderDashboard } from '../ui/dashboard.js';
 import { routeRequest, type ReadSources } from './router.js';
 
 const summaries: RunSummary[] = [
@@ -65,12 +66,13 @@ interface SourceOverrides {
   throwOnQueue?: boolean;
   summaryError?: string;
   queueError?: string;
+  now?: () => Date;
 }
 
 function makeSources(overrides: SourceOverrides = {}): ReadSources {
   const availableSummaries = overrides.summaries ?? summaries;
   const availableEntries = overrides.entries ?? queueEntries;
-  return {
+  const sources: ReadSources = {
     listRunSummaries() {
       if (overrides.throwOnSummaries === true) {
         throw new Error(overrides.summaryError ?? 'secret summary path');
@@ -84,6 +86,10 @@ function makeSources(overrides: SourceOverrides = {}): ReadSources {
       return availableEntries;
     },
   };
+  if (overrides.now !== undefined) {
+    sources.now = overrides.now;
+  }
+  return sources;
 }
 
 describe('routeRequest', () => {
@@ -215,6 +221,66 @@ describe('routeRequest', () => {
       expect(response.body).toEqual({ error: 'method not allowed' });
     });
   }
+
+  it('GET / returns the dashboard renderDashboard produces with a fixed clock', () => {
+    const generatedAt = '2026-01-01T00:00:00.000Z';
+    const response = routeRequest(
+      { method: 'GET', url: '/' },
+      makeSources({ now: () => new Date(generatedAt) }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.contentType).toBe('text/html; charset=utf-8');
+    expect(response.body).toBe(
+      renderDashboard({
+        runs: toRunList(summaries, {}),
+        queue: queueEntries,
+        generatedAt,
+      }),
+    );
+  });
+
+  it('GET / serves the dashboard when no now source is given', () => {
+    const response = routeRequest({ method: 'GET', url: '/' }, makeSources());
+
+    expect(response.status).toBe(200);
+    expect(response.contentType).toBe('text/html; charset=utf-8');
+    const body = String(response.body);
+    expect(body).toContain('<!doctype html>');
+    expect(body).toContain('Factory Control Plane');
+  });
+
+  it('POST / returns 405', () => {
+    const response = routeRequest({ method: 'POST', url: '/' }, makeSources());
+
+    expect(response.status).toBe(405);
+    expect(response.body).toEqual({ error: 'method not allowed' });
+  });
+
+  it('returns 500 without the thrown message when serving / throws', () => {
+    const sources = makeSources({
+      throwOnSummaries: true,
+      summaryError: 'secret summary /tmp/control-plane/run',
+    });
+    const response = routeRequest({ method: 'GET', url: '/' }, sources);
+
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({ error: 'read failed' });
+    expect(JSON.stringify(response)).not.toContain('secret');
+  });
+
+  it('keeps every non-dashboard route free of a contentType', () => {
+    expect(
+      routeRequest({ method: 'GET', url: '/runs' }, makeSources()).contentType,
+    ).toBeUndefined();
+    expect(
+      routeRequest({ method: 'GET', url: '/runs/run-abc' }, makeSources())
+        .contentType,
+    ).toBeUndefined();
+    expect(
+      routeRequest({ method: 'GET', url: '/queue' }, makeSources()).contentType,
+    ).toBeUndefined();
+  });
 
   it('returns 500 without the thrown message when listRunSummaries throws', () => {
     const sources = makeSources({
