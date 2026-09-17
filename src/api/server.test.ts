@@ -346,17 +346,32 @@ describe('createRequestHandler', () => {
   });
 
   it('routes a request without a url as /', () => {
-    const { sources } = makeRunSources();
+    const generatedAt = '2026-01-01T00:00:00.000Z';
+    const sources: ReadSources = {
+      listRunSummaries: () => [],
+      listQueueEntries: () => [],
+      now: () => new Date(generatedAt),
+    };
     const handler = createRequestHandler(sources);
-    const response = makeResponse();
+    const withoutUrl = makeResponse();
+    const withUrl = makeResponse();
 
     handler(
       { method: 'GET' } as unknown as IncomingMessage,
-      response as unknown as ServerResponse,
+      withoutUrl as unknown as ServerResponse,
+    );
+    handler(
+      { method: 'GET', url: '/' } as unknown as IncomingMessage,
+      withUrl as unknown as ServerResponse,
     );
 
-    expect(response.statusCode).toBe(404);
-    expect(JSON.parse(response.body)).toEqual({ error: 'not found' });
+    expect(withoutUrl.statusCode).toBe(200);
+    expect(withoutUrl.headers).toEqual({
+      'content-type': 'text/html; charset=utf-8',
+      'content-security-policy':
+        "default-src 'none'; style-src 'unsafe-inline'",
+    });
+    expect(withoutUrl.body).toBe(withUrl.body);
   });
 });
 
