@@ -64,6 +64,7 @@ const BLUEPRINT: { revision: number; status: BlueprintStatus } = {
           QUEUED: 1,
           RUNNING: 0,
           AWAITING_REVIEW: 1,
+          MERGED: 0,
           FAILED: 0,
         },
       },
@@ -87,6 +88,7 @@ const BLUEPRINT: { revision: number; status: BlueprintStatus } = {
           QUEUED: 0,
           RUNNING: 0,
           AWAITING_REVIEW: 0,
+          MERGED: 0,
           FAILED: 0,
         },
       },
@@ -96,6 +98,7 @@ const BLUEPRINT: { revision: number; status: BlueprintStatus } = {
       QUEUED: 1,
       RUNNING: 0,
       AWAITING_REVIEW: 1,
+      MERGED: 0,
       FAILED: 0,
     },
   },
@@ -158,7 +161,7 @@ describe('renderIdeaPage', () => {
     expect(html).toContain('<p>Revision: 2</p>');
     expect(html).toContain('<p>Title: Ship the idea</p>');
     expect(html).toContain(
-      'NOT_STARTED: 1, QUEUED: 1, RUNNING: 0, AWAITING_REVIEW: 1, FAILED: 0',
+      'NOT_STARTED: 1, QUEUED: 1, RUNNING: 0, AWAITING_REVIEW: 1, MERGED: 0, FAILED: 0',
     );
     const firstPhase = html.indexOf('<h3>Phase one</h3>');
     const secondPhase = html.indexOf('<h3>Phase two</h3>');
@@ -167,7 +170,7 @@ describe('renderIdeaPage', () => {
     expect(html).toContain('<p>Goal: Reach the checkpoint.</p>');
     expect(html).toContain('<p>Exit: All packets done.</p>');
     expect(html).toContain(
-      'Counts: NOT_STARTED: 0, QUEUED: 1, RUNNING: 0, AWAITING_REVIEW: 1, FAILED: 0',
+      'Counts: NOT_STARTED: 0, QUEUED: 1, RUNNING: 0, AWAITING_REVIEW: 1, MERGED: 0, FAILED: 0',
     );
     expect(html).toContain('<p>Goal: Finish the work.</p>');
     expect(html).toContain('<p>Exit: Shipped.</p>');

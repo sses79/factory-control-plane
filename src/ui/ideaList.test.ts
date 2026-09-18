@@ -14,6 +14,7 @@ const TOTALS: BlueprintStatus['totals'] = {
   QUEUED: 2,
   RUNNING: 3,
   AWAITING_REVIEW: 4,
+  MERGED: 0,
   FAILED: 5,
 };
 
@@ -116,7 +117,7 @@ describe('renderIdeaList', () => {
     expect(html).toContain(`<td>rev 2 ${totals}</td>`);
     expect(html).toContain('<td>No blueprint</td>');
     expect(totals).toBe(
-      'NOT_STARTED: 1, QUEUED: 2, RUNNING: 3, AWAITING_REVIEW: 4, FAILED: 5',
+      'NOT_STARTED: 1, QUEUED: 2, RUNNING: 3, AWAITING_REVIEW: 4, MERGED: 0, FAILED: 5',
     );
   });
 
