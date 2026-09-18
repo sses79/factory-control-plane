@@ -33,6 +33,8 @@ interface QueueDocument {
   repository_path?: string;
   original_packet_sha256?: string;
   schema_version?: number;
+  merged_at?: string;
+  merge_commit?: string;
 }
 
 function makeDocument(overrides: Partial<QueueDocument> = {}): QueueDocument {
@@ -275,6 +277,77 @@ describe('readQueueEntries', () => {
         .all(),
     ).toEqual(tablesBefore);
   });
+
+  it('carries merged_at and merge_commit through unchanged when present', () => {
+    const database = createDatabase([
+      makeRow(
+        'entry-merged',
+        JSON.stringify(
+          makeDocument({
+            entry_id: 'entry-merged',
+            merged_at: '2026-01-15T11:00:00Z',
+            merge_commit: '0123456789abcdef0123456789abcdef01234567',
+          }),
+        ),
+        '2026-01-15T10:30:00Z',
+      ),
+    ]);
+
+    const [entry] = readQueueEntries(database);
+
+    expect(entry).toEqual({
+      entry_id: 'entry-merged',
+      feature_id: 'feature-1',
+      target_repository: 'acme/widgets',
+      status: 'QUEUED',
+      queued_at: '2026-01-15T10:30:00Z',
+      merged_at: '2026-01-15T11:00:00Z',
+      merge_commit: '0123456789abcdef0123456789abcdef01234567',
+    });
+  });
+
+  it('omits merged_at and merge_commit when the document has neither', () => {
+    const database = createDatabase([
+      makeRow(
+        'entry-unmerged',
+        JSON.stringify(makeDocument({ entry_id: 'entry-unmerged' })),
+        '2026-01-15T10:30:00Z',
+      ),
+    ]);
+
+    const [entry] = readQueueEntries(database);
+
+    expect(entry).not.toHaveProperty('merged_at');
+    expect(entry).not.toHaveProperty('merge_commit');
+  });
+
+  it('throws for an invalid merged_at naming the row entry_id', () => {
+    const database = createDatabase([
+      makeRow(
+        'entry-bad-merged-at',
+        JSON.stringify(
+          makeDocument({ entry_id: 'entry-bad-merged-at', merged_at: '2026' }),
+        ),
+        '2026-01-15T10:30:00Z',
+      ),
+    ]);
+
+    expect(() => readQueueEntries(database)).toThrowError('entry-bad-merged-at');
+  });
+
+  it('throws for a merge_commit that is not 40 lowercase hex characters naming the row entry_id', () => {
+    const database = createDatabase([
+      makeRow(
+        'entry-bad-merge-commit',
+        JSON.stringify(
+          makeDocument({ entry_id: 'entry-bad-merge-commit', merge_commit: 'not-a-sha' }),
+        ),
+        '2026-01-15T10:30:00Z',
+      ),
+    ]);
+
+    expect(() => readQueueEntries(database)).toThrowError('entry-bad-merge-commit');
+  });
 });
 
 describe('QueueEntrySchema', () => {
@@ -302,6 +375,27 @@ describe('QueueEntrySchema', () => {
         'entry-minimal',
         JSON.stringify(
           makeDocument({ entry_id: 'entry-minimal', queued_at: '2026-02-03T04:05:06+01:00' }),
+        ),
+        '2026-01-15T10:30:00Z',
+      ),
+    ]);
+
+    for (const entry of readQueueEntries(database)) {
+      expect(QueueEntrySchema.parse(entry)).toEqual(entry);
+    }
+  });
+
+  it('accepts entries carrying merged_at and merge_commit', () => {
+    const database = createDatabase([
+      makeRow(
+        'entry-merged-schema',
+        JSON.stringify(
+          makeDocument({
+            entry_id: 'entry-merged-schema',
+            status: 'SUCCEEDED',
+            merged_at: '2026-01-15T11:00:00Z',
+            merge_commit: '0123456789abcdef0123456789abcdef01234567',
+          }),
         ),
         '2026-01-15T10:30:00Z',
       ),

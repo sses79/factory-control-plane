@@ -18,6 +18,8 @@ export const QueueEntrySchema = z.object({
   pull_request_url: z.string().optional(),
   terminal_reason: z.string().optional(),
   requeued_from: z.string().optional(),
+  merged_at: z.iso.datetime({ offset: true }).optional(),
+  merge_commit: z.string().regex(/^[0-9a-f]{40}$/).optional(),
 });
 
 export type QueueEntry = z.infer<typeof QueueEntrySchema>;
@@ -36,6 +38,8 @@ const RawQueueDocument = z.object({
   pull_request_url: z.string().optional(),
   terminal_reason: z.string().optional(),
   requeued_from: z.string().optional(),
+  merged_at: z.iso.datetime({ offset: true }).optional(),
+  merge_commit: z.string().regex(/^[0-9a-f]{40}$/).optional(),
 });
 
 function lastPathSegment(path: string): string {
@@ -98,6 +102,12 @@ function toQueueEntry(row: { entry_id: string; document: string }): QueueEntry {
   }
   if (raw.requeued_from !== undefined) {
     entry.requeued_from = raw.requeued_from;
+  }
+  if (raw.merged_at !== undefined) {
+    entry.merged_at = raw.merged_at;
+  }
+  if (raw.merge_commit !== undefined) {
+    entry.merge_commit = raw.merge_commit;
   }
   return entry;
 }
