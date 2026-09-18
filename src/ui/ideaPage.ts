@@ -1,7 +1,19 @@
 import type { BlueprintStatus } from '../blueprintStatus.js';
 import type { IdeaSummary } from '../ideaSummary.js';
 import type { PlanRevision } from '../state/planningDatabase.js';
-
+import {
+  card,
+  countTiles,
+  emptyState,
+  escapeHtml,
+  progressBar,
+  pullRequestLink,
+  renderPage,
+  shortId,
+  statusBadge,
+  table,
+  timestamp,
+} from './layout.js';
 import { renderMarkdown } from './markdown.js';
 
 export interface IdeaPageInput {
@@ -11,129 +23,100 @@ export interface IdeaPageInput {
   generatedAt: string;
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
-
-function countText(counts: Record<string, number>): string {
-  return Object.entries(counts)
-    .map(([label, count]) => `${escapeHtml(label)}: ${count}`)
-    .join(', ');
-}
-
-function pullRequestCell(pullRequestUrl: string | undefined): string {
-  if (pullRequestUrl === undefined) {
-    return '';
-  }
-  if (!pullRequestUrl.startsWith('https://')) {
-    return escapeHtml(pullRequestUrl);
-  }
-  const number = pullRequestUrl.slice(pullRequestUrl.lastIndexOf('/') + 1);
-  return `<a href="${escapeHtml(pullRequestUrl)}">${escapeHtml(
-    `#${number}`,
-  )}</a>`;
-}
-
-type Packet = BlueprintStatus['phases'][number]['packets'][number];
+type Phase = BlueprintStatus['phases'][number];
+type Packet = Phase['packets'][number];
 
 function packetRow(packet: Packet): string {
   const runCell =
     packet.run_id === undefined
-      ? ''
-      : `<a href="/runs/${encodeURIComponent(
-          packet.run_id,
-        )}">${escapeHtml(packet.run_id)}</a>`;
-  return `<tr><td>${escapeHtml(packet.feature_id)}</td><td>${escapeHtml(
+      ? '<span class="muted">—</span>'
+      : `<a href="/runs/${encodeURIComponent(packet.run_id)}">${shortId(packet.run_id)}</a>`;
+  return `<tr><td class="id wide">${escapeHtml(packet.feature_id)}</td><td>${statusBadge(
     packet.status,
-  )}</td><td>${String(packet.attempts)}</td><td>${runCell}</td><td>${pullRequestCell(
+  )}</td><td class="num">${String(packet.attempts)}</td><td class="id">${runCell}</td><td>${pullRequestLink(
     packet.pull_request_url,
   )}</td></tr>`;
 }
 
-const PACKET_TABLE_HEAD =
-  '<thead><tr><th>Feature</th><th>Status</th><th>Attempts</th><th>Run</th><th>Pull request</th></tr></thead>';
-
-function phaseSection(phase: BlueprintStatus['phases'][number]): string {
-  return `<h3>${escapeHtml(phase.title)}</h3>
-<p>Goal: ${escapeHtml(phase.goal)}</p>
-<p>Exit: ${escapeHtml(phase.exit)}</p>
-<p>Counts: ${countText(phase.counts)}</p>
-<table>
-${PACKET_TABLE_HEAD}
-<tbody>
-${phase.packets.map(packetRow).join('\n')}
-</tbody>
-</table>`;
+function mergedOf(counts: Record<string, number>): number {
+  return counts['MERGED'] ?? 0;
 }
 
-function planSection(plan: PlanRevision | undefined): string {
+function totalOf(counts: Record<string, number>): number {
+  return Object.values(counts).reduce((sum, count) => sum + count, 0);
+}
+
+function phaseSection(phase: Phase): string {
+  const merged = mergedOf(phase.counts);
+  const total = totalOf(phase.counts);
+  return `<div class="phase">
+<div class="phase-head"><h3>${escapeHtml(phase.title)}</h3>${progressBar(
+    merged,
+    total,
+    `${String(merged)} of ${String(total)} merged`,
+  )}</div>
+<p><strong>Goal</strong> ${escapeHtml(phase.goal)}</p>
+<p><strong>Exit</strong> ${escapeHtml(phase.exit)}</p>
+${countTiles(phase.counts, { hideZero: true })}
+${table(['Feature', 'Status', 'Attempts', 'Run', 'Pull request'], phase.packets.map(packetRow))}
+</div>`;
+}
+
+function ideaCard(idea: IdeaSummary): string {
+  return card(
+    'Idea',
+    `<dl class="facts">
+<dt>Idea ID</dt><dd class="id">${escapeHtml(idea.idea_id)}</dd>
+<dt>Operator</dt><dd>${escapeHtml(idea.operator_id)}</dd>
+<dt>Recorded</dt><dd>${timestamp(idea.created_at)}</dd>
+<dt>Length</dt><dd>${String(idea.content_length)} characters</dd>
+<dt>Excerpt</dt><dd>${escapeHtml(idea.excerpt)}</dd>
+</dl>`,
+  );
+}
+
+function planCard(plan: PlanRevision | undefined): string {
   if (plan === undefined) {
-    return '<p>No plan recorded.</p>';
+    return card('Plan', emptyState('No plan recorded.'));
   }
-  return `<p>Revision: ${String(plan.revision)}</p>
-<p>Created at: ${escapeHtml(plan.created_at)}</p>
-${renderMarkdown(plan.markdown)}`;
+  // Collapsed by default: a plan is long and read once, the blueprint above it is checked often.
+  // <details> needs no script, which the page's content-security-policy does not allow.
+  return card(
+    'Plan',
+    `<details class="plan"><summary>Show the plan</summary><div class="prose">${renderMarkdown(
+      plan.markdown,
+    )}</div></details>`,
+    `Revision ${String(plan.revision)} · ${timestamp(plan.created_at)}`,
+  );
 }
 
-function blueprintSection(
+function blueprintCard(
   blueprint: { revision: number; status: BlueprintStatus } | undefined,
 ): string {
   if (blueprint === undefined) {
-    return '<p>No blueprint recorded.</p>';
+    return card('Blueprint', emptyState('No blueprint recorded.'));
   }
-  return `<p>Revision: ${String(blueprint.revision)}</p>
-<p>Title: ${escapeHtml(blueprint.status.title)}</p>
-<p>${countText(blueprint.status.totals)}</p>
-${blueprint.status.phases.map(phaseSection).join('\n')}`;
+  const totals = blueprint.status.totals;
+  const merged = mergedOf(totals);
+  const total = totalOf(totals);
+  return card(
+    'Blueprint',
+    `<p><strong>${escapeHtml(blueprint.status.title)}</strong></p>
+${progressBar(merged, total, `${String(merged)} of ${String(total)} packets merged`)}
+<div style="height: 12px"></div>
+${countTiles(totals)}
+${blueprint.status.phases.map(phaseSection).join('\n')}`,
+    `Revision ${String(blueprint.revision)}`,
+  );
 }
 
 export function renderIdeaPage(input: IdeaPageInput): string {
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>${escapeHtml(input.idea.idea_id)}</title>
-<style>
-body {
-  font-family: system-ui, -apple-system, sans-serif;
-  margin: 1rem;
-  color: #222;
-}
-h1, h2, h3 {
-  font-weight: 600;
-}
-table {
-  border-collapse: collapse;
-  margin-top: 0.5rem;
-}
-th, td {
-  border: 1px solid #ccc;
-  padding: 0.25rem 0.5rem;
-  text-align: left;
-}
-</style>
-</head>
-<body>
-<h1>Idea ${escapeHtml(input.idea.idea_id)}</h1>
-<p><a href="/">Back to dashboard</a></p>
-<p>Generated at: ${escapeHtml(input.generatedAt)}</p>
-<h2>Idea</h2>
-<dl>
-<dt>Idea ID</dt><dd>${escapeHtml(input.idea.idea_id)}</dd>
-<dt>Operator ID</dt><dd>${escapeHtml(input.idea.operator_id)}</dd>
-<dt>Created at</dt><dd>${escapeHtml(input.idea.created_at)}</dd>
-<dt>Content length</dt><dd>${String(input.idea.content_length)}</dd>
-<dt>Excerpt</dt><dd>${escapeHtml(input.idea.excerpt)}</dd>
-</dl>
-<h2>Plan</h2>
-${planSection(input.plan)}
-<h2>Blueprint</h2>
-${blueprintSection(input.blueprint)}
-</body>
-</html>`;
+  return renderPage({
+    title: input.idea.idea_id,
+    heading: input.idea.idea_id,
+    subheading: input.idea.excerpt,
+    section: 'ideas',
+    generatedAt: input.generatedAt,
+    body: [ideaCard(input.idea), blueprintCard(input.blueprint), planCard(input.plan)].join('\n'),
+  });
 }

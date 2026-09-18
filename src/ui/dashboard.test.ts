@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { RunList } from '../runList.js';
 import type { QueueEntry } from '../state/queueDatabase.js';
 import { renderDashboard, type DashboardInput } from './dashboard.js';
+import { expectSafeDocument } from './testSafety.js';
 
 const GENERATED_AT = '2026-09-17T12:00:00Z';
 
@@ -75,210 +76,102 @@ function baseInput(): DashboardInput {
 }
 
 describe('renderDashboard', () => {
-  it('returns a document starting with <!doctype html> and titled Factory Control Plane', () => {
+  it('returns a safe document titled Factory Control Plane with the dashboard active', () => {
     const html = renderDashboard(baseInput());
-    expect(html.startsWith('<!doctype html>')).toBe(true);
     expect(html).toContain('<title>Factory Control Plane</title>');
-  });
-
-  it('includes the generatedAt value', () => {
-    const html = renderDashboard(baseInput());
+    expect(html).toContain('<h1>Dashboard</h1>');
     expect(html).toContain(`Generated at: ${GENERATED_AT}`);
+    expect(html).toContain('<a href="/" class="active" aria-current="page">Dashboard</a>');
+    expect(html).toContain('<a href="/ideas">Ideas</a>');
+    expectSafeDocument(html);
   });
 
-  it('links the dashboard to the ideas page', () => {
-    const html = renderDashboard(baseInput());
-    expect(html).toContain('<nav><a href="/ideas">Ideas</a></nav>');
-    expect(html.indexOf('<h2>Runs</h2>')).toBeGreaterThan(
-      html.indexOf('<nav><a href="/ideas">Ideas</a></nav>'),
-    );
-    expect(html.indexOf('<nav><a href="/ideas">Ideas</a></nav>')).toBeGreaterThan(
-      html.indexOf('<h1>Factory Control Plane</h1>'),
-    );
+  it('renders one row per run in the given order with a badge, short id and compact start', () => {
+    const input = baseInput();
+    input.runs = runList([
+      makeRun({ runId: 'run-0749023246ec48b7a62ce53a', featureId: 'feature-1', state: 'HUMAN_CHANGE_REVIEW', attemptCount: 2, startedAt: '2026-01-01T00:00:00Z', pullRequestUrl: 'https://github.com/org/repo/pull/12' }),
+      makeRun({ runId: 'run-2', featureId: 'feature-2', state: 'FAILED', attemptCount: 3 }),
+    ]);
+    const html = renderDashboard(input);
+    const first = html.indexOf('feature-1');
+    const second = html.indexOf('feature-2');
+    expect(first).toBeGreaterThan(-1);
+    expect(second).toBeGreaterThan(first);
+    expect(html).toContain('<span class="badge badge-success" title="HUMAN_CHANGE_REVIEW">Human change review</span>');
+    expect(html).toContain('<span title="run-0749023246ec48b7a62ce53a">run-0749023246ec</span>');
+    expect(html).toContain('<td class="num">2</td>');
+    expect(html).toContain('<time datetime="2026-01-01T00:00:00Z">2026-01-01 00:00:00</time>');
+    expect(html).toContain('<a class="pr" href="https://github.com/org/repo/pull/12">#12</a>');
+    expect(html).toContain('<span class="badge badge-danger" title="FAILED">Failed</span>');
   });
 
-  it('renders one row per run with all fields in the given order', () => {
-    const first = makeRun({
-      runId: 'run-2',
-      featureId: 'feature-2',
-      state: 'FAILED',
-      attemptCount: 3,
-      startedAt: '2026-01-02T00:00:00Z',
-    });
-    const second = makeRun({
-      runId: 'run-3',
-      featureId: 'feature-3',
-      state: 'DONE',
-      attemptCount: 1,
-      startedAt: '2026-01-03T00:00:00Z',
-    });
-    const third = makeRun({
-      runId: 'run-4',
-      featureId: 'feature-4',
-      state: 'BLOCKED',
-      attemptCount: 0,
-    });
-    const html = renderDashboard({
-      ...baseInput(),
-      runs: runList([first, second, third]),
-    });
-    expect(html).toContain(
-      '<tr><td>FAILED</td><td>feature-2</td><td>run-2</td><td>3</td><td>2026-01-02T00:00:00Z</td><td></td></tr>',
-    );
-    expect(html).toContain(
-      '<tr><td>DONE</td><td>feature-3</td><td>run-3</td><td>1</td><td>2026-01-03T00:00:00Z</td><td></td></tr>',
-    );
-    expect(html).toContain(
-      '<tr><td>BLOCKED</td><td>feature-4</td><td>run-4</td><td>0</td><td></td><td></td></tr>',
-    );
-    expect(html.indexOf('feature-2')).toBeLessThan(html.indexOf('feature-3'));
-    expect(html.indexOf('feature-3')).toBeLessThan(html.indexOf('feature-4'));
+  it('shows run counts by state and queue counts by status as tiles, with totals', () => {
+    const input = baseInput();
+    input.runs = { total: 2, by_state: { BUILDING: 1, DONE: 1 }, runs: [makeRun(), makeRun({ runId: 'run-2', state: 'DONE' })] };
+    input.queue = [makeQueueEntry(), makeQueueEntry({ entryId: 'entry-2' }), makeQueueEntry({ entryId: 'entry-3', status: 'FAILED' })];
+    const html = renderDashboard(input);
+    expect(html).toContain('<span class="tile-count">1</span><span class="tile-label">Building</span>');
+    expect(html).toContain('<span class="tile-count">1</span><span class="tile-label">Done</span>');
+    expect(html).toContain('<span class="tile-count">2</span><span class="tile-label">Queued</span>');
+    expect(html).toContain('<span class="tile-count">1</span><span class="tile-label">Failed</span>');
+    expect(html).toContain('2 total');
+    expect(html).toContain('3 entries');
   });
 
-  it('shows run counts by state and queue counts by status', () => {
-    const html = renderDashboard({
-      ...baseInput(),
-      runs: {
-        total: 2,
-        by_state: { BUILDING: 1, DONE: 1 },
-        runs: [
-          makeRun({ runId: 'run-1', state: 'BUILDING' }),
-          makeRun({ runId: 'run-2', state: 'DONE' }),
-        ],
-      },
-      queue: [
-        makeQueueEntry({ entryId: 'e-1', status: 'QUEUED' }),
-        makeQueueEntry({ entryId: 'e-2', status: 'QUEUED' }),
-        makeQueueEntry({ entryId: 'e-3', status: 'FAILED' }),
-      ],
-    });
-    expect(html).toContain('BUILDING: 1');
-    expect(html).toContain('DONE: 1');
-    expect(html).toContain('QUEUED: 2');
-    expect(html).toContain('FAILED: 1');
+  it('renders queue outcomes as a pull request link, a terminal reason, or an empty mark', () => {
+    const input = baseInput();
+    input.queue = [
+      makeQueueEntry({ entryId: 'e1', featureId: 'with-pr', status: 'SUCCEEDED', runDir: 'cp-a', pullRequestUrl: 'https://github.com/org/repo/pull/3' }),
+      makeQueueEntry({ entryId: 'e2', featureId: 'with-reason', status: 'FAILED', terminalReason: 'QUEUE_BASE_STALE' }),
+      makeQueueEntry({ entryId: 'e3', featureId: 'waiting' }),
+    ];
+    const html = renderDashboard(input);
+    expect(html).toContain('<a class="pr" href="https://github.com/org/repo/pull/3">#3</a>');
+    expect(html).toContain('<span class="id">QUEUE_BASE_STALE</span>');
+    expect(html).toContain('<td class="id">cp-a</td>');
+    expect(html.match(/<span class="muted">—<\/span>/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
 
-  it('links a run pull request to its https URL with the trailing number prefixed by #', () => {
-    const html = renderDashboard({
-      ...baseInput(),
-      runs: runList([
-        makeRun({
-          runId: 'run-1',
-          pullRequestUrl: 'https://github.com/org/repo/pull/42',
-        }),
-      ]),
-    });
-    expect(html).toContain(
-      '<td><a href="https://github.com/org/repo/pull/42">#42</a></td>',
-    );
-  });
-
-  it('renders queue outcomes as link, terminal reason, or empty cell', () => {
-    const html = renderDashboard({
-      ...baseInput(),
-      queue: [
-        makeQueueEntry({
-          entryId: 'e-1',
-          pullRequestUrl: 'https://github.com/org/repo/pull/7',
-        }),
-        makeQueueEntry({ entryId: 'e-2', terminalReason: 'hung up' }),
-        makeQueueEntry({ entryId: 'e-3', runDir: 'dir-9' }),
-      ],
-    });
-    expect(html).toContain(
-      '<tr><td>QUEUED</td><td>feature-1</td><td>2026-01-01T00:00:00Z</td><td></td><td><a href="https://github.com/org/repo/pull/7">#7</a></td></tr>',
-    );
-    expect(html).toContain(
-      '<tr><td>QUEUED</td><td>feature-1</td><td>2026-01-01T00:00:00Z</td><td></td><td>hung up</td></tr>',
-    );
-    expect(html).toContain(
-      '<tr><td>QUEUED</td><td>feature-1</td><td>2026-01-01T00:00:00Z</td><td>dir-9</td><td></td></tr>',
-    );
-  });
-
-  it('escapes HTML metacharacters from input values', () => {
-    const featureId = '<img src=x onerror=alert(1)>';
-    const html = renderDashboard({
-      ...baseInput(),
-      runs: runList([makeRun({ runId: 'run-1', featureId })]),
-      queue: [makeQueueEntry({ entryId: 'e-1', featureId })],
-    });
+  it('escapes markup from every data value', () => {
+    const payload = '<img src=x onerror=alert(1)>';
+    const input = baseInput();
+    input.runs = runList([makeRun({ featureId: payload })]);
+    input.queue = [makeQueueEntry({ featureId: payload, terminalReason: payload, status: 'FAILED' })];
+    const html = renderDashboard(input);
     expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
-    expect(html).not.toContain('<img');
+    expect(html).not.toContain(payload);
+    expectSafeDocument(html);
   });
 
-  it('escapes double quotes in link hrefs so they cannot break out of the attribute', () => {
-    const url = 'https://example.com/pull/1" onclick="alert(1)';
-    const html = renderDashboard({
-      ...baseInput(),
-      runs: runList([makeRun({ runId: 'run-1', pullRequestUrl: url })]),
-    });
-    expect(html).toContain(
-      'href="https://example.com/pull/1&quot; onclick=&quot;alert(1)"',
-    );
-    expect(html).not.toContain(' onclick="');
-  });
-
-  it('renders a javascript: pull request URL as escaped text without a link', () => {
-    const url = 'javascript:alert(1)<img>';
-    const html = renderDashboard({
-      ...baseInput(),
-      queue: [makeQueueEntry({ entryId: 'e-1', pullRequestUrl: url })],
-    });
-    expect(html).toContain('<td>javascript:alert(1)&lt;img&gt;</td>');
+  it('never turns a non-https pull request value into a link', () => {
+    const input = baseInput();
+    input.runs = runList([makeRun({ pullRequestUrl: 'javascript:alert(1)<img>' })]);
+    const html = renderDashboard(input);
+    expect(html).toContain('javascript:alert(1)&lt;img&gt;');
     expect(html).not.toContain('href="javascript:');
+    expectSafeDocument(html);
   });
 
-  it('shows No runs. and Queue is empty. when both sections have no rows', () => {
+  it('keeps a quote in a pull request URL inside its attribute', () => {
+    const input = baseInput();
+    input.runs = runList([makeRun({ pullRequestUrl: 'https://github.com/org/repo/pull/1" onclick="x' })]);
+    const html = renderDashboard(input);
+    // The escaped quotes keep the text inside the href value; no attribute can start.
+    expect(html).toContain('href="https://github.com/org/repo/pull/1&quot; onclick=&quot;x"');
+    expect(html).not.toContain('" onclick="');
+  });
+
+  it('states an empty run list and an empty queue instead of drawing empty tables', () => {
     const html = renderDashboard(baseInput());
-    expect(html).toContain('No runs.');
-    expect(html).toContain('Queue is empty.');
+    expect(html).toContain('<p class="empty">No runs.</p>');
+    expect(html).toContain('<p class="empty">Queue is empty.</p>');
     expect(html).not.toContain('<table>');
   });
 
-  it('contains no script, no on-prefixed attribute, and no external resource', () => {
-    const html = renderDashboard({
-      ...baseInput(),
-      runs: runList([
-        makeRun({
-          runId: 'run-1',
-          pullRequestUrl: 'https://github.com/org/repo/pull/1',
-        }),
-      ]),
-      queue: [
-        makeQueueEntry({
-          entryId: 'e-1',
-          pullRequestUrl: 'https://github.com/org/repo/pull/2',
-        }),
-      ],
-    });
-    expect(html).not.toContain('<script');
-    expect(html).not.toContain('<link');
-    expect(html).not.toMatch(/<[a-zA-Z][a-zA-Z0-9-]*[^>]*\s+on[a-zA-Z-]+\s*=/);
-    expect(html).not.toContain('http://');
-    const hrefs: string[] = [];
-    for (const match of html.matchAll(/href="([^"]*)"/g)) {
-      const href = match[1];
-      if (href !== undefined) {
-        hrefs.push(href);
-        expect(href === '/ideas' || href.startsWith('https://')).toBe(true);
-      }
-    }
-    expect(hrefs.length).toBeGreaterThan(0);
-    expect((html.match(/https:\/\//g) ?? []).length).toBe(
-      hrefs.filter((href) => href !== '/ideas').length,
-    );
-  });
-
   it('does not mutate its input', () => {
-    const runs = runList([
-      makeRun({
-        runId: 'run-1',
-        pullRequestUrl: 'https://github.com/org/repo/pull/1',
-      }),
-    ]);
-    const queue = [makeQueueEntry({ entryId: 'e-1', runDir: 'dir-1' })];
-    const input = { runs, queue, generatedAt: GENERATED_AT };
+    const input = baseInput();
+    input.runs = runList([makeRun()]);
+    input.queue = [makeQueueEntry()];
     const snapshot = structuredClone(input);
     renderDashboard(input);
     expect(input).toEqual(snapshot);
