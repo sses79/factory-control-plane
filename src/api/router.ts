@@ -3,10 +3,14 @@ import type { RunSummary } from '../runSummary.js';
 import { toRunTrace } from '../runTrace.js';
 import type { QueueEntry } from '../state/queueDatabase.js';
 import { renderDashboard } from '../ui/dashboard.js';
+import { renderIdeaList, type IdeaListEntry } from '../ui/ideaList.js';
+import { renderIdeaPage, type IdeaPageInput } from '../ui/ideaPage.js';
 
 export interface ReadSources {
   listRunSummaries(): RunSummary[];
   listQueueEntries(): QueueEntry[];
+  listIdeas?(): IdeaListEntry[];
+  getIdea?(ideaId: string): Omit<IdeaPageInput, 'generatedAt'> | undefined;
   now?: () => Date;
 }
 
@@ -99,6 +103,64 @@ function handleQueue(
   return ok({ total: entries.length, by_status: byStatus, entries });
 }
 
+function handleIdeas(
+  request: { method: string },
+  sources: ReadSources,
+): ReadResponse {
+  if (request.method !== 'GET') {
+    return methodNotAllowed();
+  }
+
+  const generatedAt = (sources.now ?? (() => new Date()))().toISOString();
+  return {
+    status: 200,
+    contentType: 'text/html; charset=utf-8',
+    body: renderIdeaList({
+      ideas: sources.listIdeas?.() ?? [],
+      generatedAt,
+    }),
+  };
+}
+
+function handleIdeasJson(
+  request: { method: string },
+  sources: ReadSources,
+): ReadResponse {
+  if (request.method !== 'GET') {
+    return methodNotAllowed();
+  }
+
+  const ideas = sources.listIdeas?.() ?? [];
+  return ok({ total: ideas.length, ideas });
+}
+
+function handleIdeaDetail(
+  request: { method: string },
+  ideaId: string,
+  sources: ReadSources,
+  asJson: boolean,
+): ReadResponse {
+  if (request.method !== 'GET') {
+    return methodNotAllowed();
+  }
+
+  const idea = sources.getIdea?.(ideaId);
+  if (idea === undefined) {
+    return { status: 404, body: { error: 'idea not found' } };
+  }
+
+  if (asJson) {
+    return ok(idea);
+  }
+
+  const generatedAt = (sources.now ?? (() => new Date()))().toISOString();
+  return {
+    status: 200,
+    contentType: 'text/html; charset=utf-8',
+    body: renderIdeaPage({ ...idea, generatedAt }),
+  };
+}
+
 function handleDashboard(
   request: { method: string },
   sources: ReadSources,
@@ -156,6 +218,32 @@ export function routeRequest(
         return { status: 400, body: { error: 'invalid run id' } };
       }
       return handleRunDetail(request, runId, sources);
+    }
+
+    if (firstSegment === 'ideas.json' && secondSegment === undefined) {
+      return handleIdeasJson(request, sources);
+    }
+
+    if (firstSegment === 'ideas' && secondSegment === undefined) {
+      return handleIdeas(request, sources);
+    }
+
+    if (
+      firstSegment === 'ideas' &&
+      secondSegment !== undefined &&
+      segments.length === 2
+    ) {
+      const asJson = secondSegment.endsWith('.json');
+      const rawIdeaId = asJson
+        ? secondSegment.slice(0, -'.json'.length)
+        : secondSegment;
+      let ideaId: string;
+      try {
+        ideaId = decodeURIComponent(rawIdeaId);
+      } catch {
+        return { status: 400, body: { error: 'invalid idea id' } };
+      }
+      return handleIdeaDetail(request, ideaId, sources, asJson);
     }
 
     if (firstSegment === 'queue' && secondSegment === undefined) {

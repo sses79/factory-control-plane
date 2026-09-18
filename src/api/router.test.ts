@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
+import type { BlueprintStatus } from '../blueprintStatus.js';
+import type { IdeaSummary } from '../ideaSummary.js';
 import { toRunList } from '../runList.js';
 import type { RunSummary } from '../runSummary.js';
 import { toRunTrace } from '../runTrace.js';
+import type { PlanRevision } from '../state/planningDatabase.js';
 import type { QueueEntry } from '../state/queueDatabase.js';
 import { renderDashboard } from '../ui/dashboard.js';
+import { renderIdeaList, type IdeaListEntry } from '../ui/ideaList.js';
+import { renderIdeaPage, type IdeaPageInput } from '../ui/ideaPage.js';
 import { routeRequest, type ReadSources } from './router.js';
 
 const summaries: RunSummary[] = [
@@ -59,6 +64,75 @@ const queueEntries: QueueEntry[] = [
   },
 ];
 
+const ideaOne: IdeaSummary = {
+  idea_id: 'idea-1',
+  operator_id: 'operator-1',
+  classification: 'public',
+  content_sha256: 'sha-idea-1',
+  created_at: '2026-05-01T00:00:00.000Z',
+  origin: 'local-manual',
+  content_length: 123,
+  excerpt: 'First idea excerpt',
+};
+
+const ideaTwo: IdeaSummary = {
+  idea_id: 'idea/two',
+  operator_id: 'operator-2',
+  classification: 'public',
+  content_sha256: 'sha-idea-2',
+  created_at: '2026-05-02T00:00:00.000Z',
+  origin: 'local-manual',
+  content_length: 456,
+  excerpt: 'Second idea excerpt',
+};
+
+const planRevision: PlanRevision = {
+  idea_id: 'idea-1',
+  revision: 3,
+  created_at: '2026-05-03T00:00:00.000Z',
+  content_sha256: 'plan-sha',
+  markdown: '# Plan for idea-1',
+};
+
+const blueprintStatus: BlueprintStatus = {
+  idea_id: 'idea-1',
+  project_id: 'project-1',
+  title: 'Build the widget',
+  phases: [],
+  totals: {
+    NOT_STARTED: 2,
+    QUEUED: 1,
+    RUNNING: 0,
+    AWAITING_REVIEW: 0,
+    FAILED: 0,
+  },
+};
+
+const ideaListEntries: IdeaListEntry[] = [
+  {
+    idea: ideaOne,
+    plan_revision: planRevision.revision,
+    blueprint: { revision: 1, totals: blueprintStatus.totals },
+  },
+  { idea: ideaTwo },
+];
+
+function getIdeaPage(
+  ideaId: string,
+): Omit<IdeaPageInput, 'generatedAt'> | undefined {
+  if (ideaId === ideaOne.idea_id) {
+    return {
+      idea: ideaOne,
+      plan: planRevision,
+      blueprint: { revision: 1, status: blueprintStatus },
+    };
+  }
+  if (ideaId === ideaTwo.idea_id) {
+    return { idea: ideaTwo };
+  }
+  return undefined;
+}
+
 interface SourceOverrides {
   summaries?: RunSummary[];
   entries?: QueueEntry[];
@@ -67,6 +141,8 @@ interface SourceOverrides {
   summaryError?: string;
   queueError?: string;
   now?: () => Date;
+  listIdeas?: () => IdeaListEntry[];
+  getIdea?: (ideaId: string) => Omit<IdeaPageInput, 'generatedAt'> | undefined;
 }
 
 function makeSources(overrides: SourceOverrides = {}): ReadSources {
@@ -88,6 +164,12 @@ function makeSources(overrides: SourceOverrides = {}): ReadSources {
   };
   if (overrides.now !== undefined) {
     sources.now = overrides.now;
+  }
+  if (overrides.listIdeas !== undefined) {
+    sources.listIdeas = overrides.listIdeas;
+  }
+  if (overrides.getIdea !== undefined) {
+    sources.getIdea = overrides.getIdea;
   }
   return sources;
 }
@@ -317,5 +399,213 @@ describe('routeRequest', () => {
 
     expect(summaries).toEqual(originalSummaries);
     expect(queueEntries).toEqual(originalEntries);
+  });
+
+  it('GET /ideas returns the IdeaList renderIdeaList produces with a fixed clock', () => {
+    const generatedAt = '2026-01-01T00:00:00.000Z';
+    const response = routeRequest(
+      { method: 'GET', url: '/ideas' },
+      makeSources({
+        now: () => new Date(generatedAt),
+        listIdeas: () => ideaListEntries,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.contentType).toBe('text/html; charset=utf-8');
+    expect(response.body).toBe(
+      renderIdeaList({ ideas: ideaListEntries, generatedAt }),
+    );
+  });
+
+  it('GET /ideas.json returns total and the ideas in source order', () => {
+    const response = routeRequest(
+      { method: 'GET', url: '/ideas.json' },
+      makeSources({ listIdeas: () => ideaListEntries }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      total: ideaListEntries.length,
+      ideas: ideaListEntries,
+    });
+  });
+
+  it('GET /ideas/idea-1 returns the page renderIdeaPage produces with a fixed clock', () => {
+    const generatedAt = '2026-01-01T00:00:00.000Z';
+    const response = routeRequest(
+      { method: 'GET', url: '/ideas/idea-1' },
+      makeSources({
+        now: () => new Date(generatedAt),
+        getIdea: getIdeaPage,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.contentType).toBe('text/html; charset=utf-8');
+    expect(response.body).toBe(
+      renderIdeaPage({
+        idea: ideaOne,
+        plan: planRevision,
+        blueprint: { revision: 1, status: blueprintStatus },
+        generatedAt,
+      }),
+    );
+  });
+
+  it('GET /ideas decodes URL-encoded idea ids before matching', () => {
+    const generatedAt = '2026-01-01T00:00:00.000Z';
+    const response = routeRequest(
+      { method: 'GET', url: '/ideas/idea%2Ftwo' },
+      makeSources({
+        now: () => new Date(generatedAt),
+        getIdea: getIdeaPage,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toBe(renderIdeaPage({ idea: ideaTwo, generatedAt }));
+  });
+
+  it('GET /ideas/idea-1.json returns the idea, its plan and its blueprint status', () => {
+    const response = routeRequest(
+      { method: 'GET', url: '/ideas/idea-1.json' },
+      makeSources({ getIdea: getIdeaPage }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      idea: ideaOne,
+      plan: planRevision,
+      blueprint: { revision: 1, status: blueprintStatus },
+    });
+  });
+
+  it('GET /ideas/idea%2Ftwo.json omits absent plan and blueprint parts', () => {
+    const response = routeRequest(
+      { method: 'GET', url: '/ideas/idea%2Ftwo.json' },
+      makeSources({ getIdea: getIdeaPage }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = response.body as {
+      idea: IdeaSummary;
+      plan?: unknown;
+      blueprint?: unknown;
+    };
+    expect(body.idea).toEqual(ideaTwo);
+    expect(body.plan).toBeUndefined();
+    expect(body.blueprint).toBeUndefined();
+  });
+
+  for (const url of ['/ideas/idea-missing', '/ideas/idea-missing.json']) {
+    it(`GET ${url} returns 404 when the idea is unknown`, () => {
+      const response = routeRequest(
+        { method: 'GET', url },
+        makeSources({ getIdea: getIdeaPage }),
+      );
+
+      expect(response.status).toBe(404);
+      expect(response.body).toEqual({ error: 'idea not found' });
+    });
+  }
+
+  for (const url of ['/ideas/%zz', '/ideas/%zz.json']) {
+    it(`GET ${url} returns 400 for an invalid idea id`, () => {
+      const response = routeRequest({ method: 'GET', url }, makeSources());
+
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({ error: 'invalid idea id' });
+    });
+  }
+
+  it('GET /ideas serves an empty list when no listIdeas source is given', () => {
+    const generatedAt = '2026-01-01T00:00:00.000Z';
+    const response = routeRequest(
+      { method: 'GET', url: '/ideas' },
+      makeSources({ now: () => new Date(generatedAt) }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toBe(renderIdeaList({ ideas: [], generatedAt }));
+  });
+
+  it('GET /ideas.json reports zero ideas when no listIdeas source is given', () => {
+    const response = routeRequest(
+      { method: 'GET', url: '/ideas.json' },
+      makeSources(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ total: 0, ideas: [] });
+  });
+
+  for (const url of ['/ideas/idea-missing', '/ideas/idea-missing.json']) {
+    it(`GET ${url} returns 404 when no getIdea source is given`, () => {
+      const response = routeRequest({ method: 'GET', url }, makeSources());
+
+      expect(response.status).toBe(404);
+      expect(response.body).toEqual({ error: 'idea not found' });
+    });
+  }
+
+  const ideaMethodCases: Array<[string, string]> = [
+    ['POST', '/ideas'],
+    ['POST', '/ideas.json'],
+    ['PUT', '/ideas/idea-1'],
+    ['DELETE', '/ideas/idea-1.json'],
+  ];
+
+  for (const [method, url] of ideaMethodCases) {
+    it(`${method} ${url} returns 405`, () => {
+      const response = routeRequest({ method, url }, makeSources());
+
+      expect(response.status).toBe(405);
+      expect(response.body).toEqual({ error: 'method not allowed' });
+    });
+  }
+
+  it('returns 500 without the thrown message when listIdeas throws', () => {
+    const sources = makeSources({
+      listIdeas: () => {
+        throw new Error('secret idea list /var/lib/control-plane/ideas');
+      },
+    });
+    const response = routeRequest({ method: 'GET', url: '/ideas' }, sources);
+
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({ error: 'read failed' });
+    expect(JSON.stringify(response)).not.toContain('secret');
+  });
+
+  it('returns 500 without the thrown message when getIdea throws', () => {
+    const sources = makeSources({
+      getIdea: () => {
+        throw new Error('secret idea page /var/lib/control-plane/ideas');
+      },
+    });
+    const response = routeRequest(
+      { method: 'GET', url: '/ideas/idea-1' },
+      sources,
+    );
+
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({ error: 'read failed' });
+    expect(JSON.stringify(response)).not.toContain('secret');
+  });
+
+  it('keeps every idea JSON route free of a contentType', () => {
+    expect(
+      routeRequest(
+        { method: 'GET', url: '/ideas.json' },
+        makeSources({ listIdeas: () => [] }),
+      ).contentType,
+    ).toBeUndefined();
+    expect(
+      routeRequest(
+        { method: 'GET', url: '/ideas/idea-1.json' },
+        makeSources({ getIdea: () => ({ idea: ideaOne }) }),
+      ).contentType,
+    ).toBeUndefined();
   });
 });
