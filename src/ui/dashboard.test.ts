@@ -86,6 +86,17 @@ describe('renderDashboard', () => {
     expect(html).toContain(`Generated at: ${GENERATED_AT}`);
   });
 
+  it('links the dashboard to the ideas page', () => {
+    const html = renderDashboard(baseInput());
+    expect(html).toContain('<nav><a href="/ideas">Ideas</a></nav>');
+    expect(html.indexOf('<h2>Runs</h2>')).toBeGreaterThan(
+      html.indexOf('<nav><a href="/ideas">Ideas</a></nav>'),
+    );
+    expect(html.indexOf('<nav><a href="/ideas">Ideas</a></nav>')).toBeGreaterThan(
+      html.indexOf('<h1>Factory Control Plane</h1>'),
+    );
+  });
+
   it('renders one row per run with all fields in the given order', () => {
     const first = makeRun({
       runId: 'run-2',
@@ -250,11 +261,13 @@ describe('renderDashboard', () => {
       const href = match[1];
       if (href !== undefined) {
         hrefs.push(href);
-        expect(href.startsWith('https://')).toBe(true);
+        expect(href === '/ideas' || href.startsWith('https://')).toBe(true);
       }
     }
     expect(hrefs.length).toBeGreaterThan(0);
-    expect((html.match(/https:\/\//g) ?? []).length).toBe(hrefs.length);
+    expect((html.match(/https:\/\//g) ?? []).length).toBe(
+      hrefs.filter((href) => href !== '/ideas').length,
+    );
   });
 
   it('does not mutate its input', () => {
