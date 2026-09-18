@@ -1,6 +1,7 @@
 import { PACKET_STATUSES } from '../blueprintStatus.js';
 import type { BlueprintStatus } from '../blueprintStatus.js';
 import type { IdeaSummary } from '../ideaSummary.js';
+import { card, emptyState, escapeHtml, progressBar, renderPage, table, timestamp } from './layout.js';
 
 export interface IdeaListEntry {
   idea: IdeaSummary;
@@ -8,91 +9,54 @@ export interface IdeaListEntry {
   blueprint?: { revision: number; totals: BlueprintStatus['totals'] };
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
-
 function planCell(planRevision: number | undefined): string {
   if (planRevision === undefined) {
-    return '<td>No plan</td>';
+    return '<td class="nowrap"><span class="muted">No plan</span></td>';
   }
-  return `<td>rev ${String(planRevision)}</td>`;
+  return `<td class="nowrap">rev ${String(planRevision)}</td>`;
 }
 
 function blueprintCell(
-  blueprint:
-    | { revision: number; totals: BlueprintStatus['totals'] }
-    | undefined,
+  blueprint: { revision: number; totals: BlueprintStatus['totals'] } | undefined,
 ): string {
   if (blueprint === undefined) {
-    return '<td>No blueprint</td>';
+    return '<td><span class="muted">No blueprint</span></td>';
   }
-  const totals = PACKET_STATUSES.map(
+  const total = PACKET_STATUSES.reduce((sum, status) => sum + blueprint.totals[status], 0);
+  const merged = blueprint.totals.MERGED;
+  // The full count per status stays in the title, in PACKET_STATUSES order, for anyone who wants it.
+  const breakdown = PACKET_STATUSES.map(
     (status) => `${status}: ${String(blueprint.totals[status])}`,
   ).join(', ');
-  return `<td>rev ${String(blueprint.revision)} ${totals}</td>`;
+  return `<td title="${escapeHtml(breakdown)}"><span class="muted">rev ${String(
+    blueprint.revision,
+  )}</span>${progressBar(merged, total, `${String(merged)} of ${String(total)} merged`)}</td>`;
 }
 
 function ideaRow(entry: IdeaListEntry): string {
   const idea = entry.idea;
-  return `<tr><td><a href="/ideas/${encodeURIComponent(
+  return `<tr><td class="id"><a href="/ideas/${encodeURIComponent(idea.idea_id)}">${escapeHtml(
     idea.idea_id,
-  )}">${escapeHtml(idea.idea_id)}</a></td><td>${escapeHtml(
-    idea.excerpt,
-  )}</td><td>${escapeHtml(idea.created_at)}</td>${planCell(
-    entry.plan_revision,
-  )}${blueprintCell(entry.blueprint)}</tr>`;
+  )}</a></td><td class="wide">${escapeHtml(idea.excerpt)}</td><td>${timestamp(
+    idea.created_at,
+  )}</td>${planCell(entry.plan_revision)}${blueprintCell(entry.blueprint)}</tr>`;
 }
 
-export function renderIdeaList(input: {
-  ideas: IdeaListEntry[];
-  generatedAt: string;
-}): string {
-  const rows = input.ideas.map(ideaRow).join('\n');
-  const listBody =
+export function renderIdeaList(input: { ideas: IdeaListEntry[]; generatedAt: string }): string {
+  const body =
     input.ideas.length === 0
-      ? '<p>No ideas recorded.</p>'
-      : `<table>
-<thead><tr><th>Idea</th><th>Excerpt</th><th>Created</th><th>Plan</th><th>Blueprint</th></tr></thead>
-<tbody>
-${rows}
-</tbody>
-</table>`;
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Ideas</title>
-<style>
-body {
-  font-family: system-ui, -apple-system, sans-serif;
-  margin: 1rem;
-  color: #222;
-}
-h1 {
-  font-weight: 600;
-}
-table {
-  border-collapse: collapse;
-  margin-top: 0.5rem;
-}
-th, td {
-  border: 1px solid #ccc;
-  padding: 0.25rem 0.5rem;
-  text-align: left;
-}
-</style>
-</head>
-<body>
-<h1>Ideas</h1>
-<p><a href="/">Back to dashboard</a></p>
-<p>Generated at: ${escapeHtml(input.generatedAt)}</p>
-${listBody}
-</body>
-</html>`;
+      ? card('Ideas', emptyState('No ideas recorded.'))
+      : card(
+          'Ideas',
+          table(['Idea', 'Excerpt', 'Recorded', 'Plan', 'Blueprint'], input.ideas.map(ideaRow)),
+          `${String(input.ideas.length)} recorded`,
+        );
+  return renderPage({
+    title: 'Ideas',
+    heading: 'Ideas',
+    subheading: 'Each idea with its plan and how far its blueprint has got.',
+    section: 'ideas',
+    generatedAt: input.generatedAt,
+    body,
+  });
 }
