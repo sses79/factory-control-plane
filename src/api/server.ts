@@ -8,9 +8,17 @@ import {
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
+import { toBlueprintStatus } from '../blueprintStatus.js';
 import type { RunSummary } from '../runSummary.js';
+import { readIdeas } from '../state/ideaDatabase.js';
+import {
+  readLatestBlueprint,
+  readLatestPlan,
+} from '../state/planningDatabase.js';
 import { readQueueEntries } from '../state/queueDatabase.js';
 import { readRunSummaries } from '../state/runDatabase.js';
+import type { IdeaListEntry } from '../ui/ideaList.js';
+import type { IdeaPageInput } from '../ui/ideaPage.js';
 import { routeRequest, type ReadSources } from './router.js';
 
 export interface ReadSourcesOptions {
@@ -21,7 +29,14 @@ export interface ReadSourcesOptions {
   openDatabase?: (path: string) => DatabaseSync;
 }
 
-export function createReadSources(options: ReadSourcesOptions): ReadSources {
+export interface ReadSourcesWithIdeas extends ReadSources {
+  listIdeas(): IdeaListEntry[];
+  getIdea(ideaId: string): Omit<IdeaPageInput, 'generatedAt'> | undefined;
+}
+
+export function createReadSources(
+  options: ReadSourcesOptions,
+): ReadSourcesWithIdeas {
   const listDirectories =
     options.listDirectories ??
     ((root: string) =>
@@ -58,6 +73,74 @@ export function createReadSources(options: ReadSourcesOptions): ReadSources {
       const database = openDatabase(options.queuePath);
       try {
         return readQueueEntries(database);
+      } finally {
+        database.close();
+      }
+    },
+    listIdeas() {
+      if (!fileExists(options.queuePath)) {
+        return [];
+      }
+      const database = openDatabase(options.queuePath);
+      try {
+        const ideas = readIdeas(database);
+        if (ideas.length === 0) {
+          return [];
+        }
+        const queue = readQueueEntries(database);
+        const runs = this.listRunSummaries();
+        return ideas.map((idea) => {
+          const entry: IdeaListEntry = { idea };
+          const plan = readLatestPlan(database, idea.idea_id);
+          if (plan !== undefined) {
+            entry.plan_revision = plan.revision;
+          }
+          const blueprint = readLatestBlueprint(database, idea.idea_id);
+          if (blueprint !== undefined) {
+            entry.blueprint = {
+              revision: blueprint.revision,
+              totals: toBlueprintStatus({
+                blueprint: blueprint.blueprint,
+                queue,
+                runs,
+              }).totals,
+            };
+          }
+          return entry;
+        });
+      } finally {
+        database.close();
+      }
+    },
+    getIdea(ideaId: string) {
+      if (!fileExists(options.queuePath)) {
+        return undefined;
+      }
+      const database = openDatabase(options.queuePath);
+      try {
+        const idea = readIdeas(database).find(
+          (candidate) => candidate.idea_id === ideaId,
+        );
+        if (idea === undefined) {
+          return undefined;
+        }
+        const page: Omit<IdeaPageInput, 'generatedAt'> = { idea };
+        const plan = readLatestPlan(database, ideaId);
+        if (plan !== undefined) {
+          page.plan = plan;
+        }
+        const blueprint = readLatestBlueprint(database, ideaId);
+        if (blueprint !== undefined) {
+          page.blueprint = {
+            revision: blueprint.revision,
+            status: toBlueprintStatus({
+              blueprint: blueprint.blueprint,
+              queue: readQueueEntries(database),
+              runs: this.listRunSummaries(),
+            }),
+          };
+        }
+        return page;
       } finally {
         database.close();
       }

@@ -12,6 +12,7 @@ import {
   createReadSources,
   createRequestHandler,
   startReadServer,
+  type ReadSourcesWithIdeas,
 } from './server.js';
 
 vi.mock('node:http', () => ({
@@ -115,6 +116,125 @@ function createQueueDatabase(entryIds: string[]): DatabaseSync {
   return database;
 }
 
+function createHomeDatabase(withPlanning = true): DatabaseSync {
+  const database = new DatabaseSync(':memory:');
+  database.exec(`
+    CREATE TABLE packet_queue (
+      entry_id TEXT PRIMARY KEY,
+      packet_sha256 TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL,
+      queued_at TEXT NOT NULL,
+      document TEXT NOT NULL
+    );
+    CREATE TABLE idea_inbox (
+      idea_id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      document TEXT NOT NULL
+    );
+    CREATE TABLE planning_revisions (
+      idea_id TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      content_sha256 TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      content TEXT NOT NULL,
+      PRIMARY KEY (idea_id, revision, kind)
+    );
+  `);
+  database
+    .prepare(
+      `INSERT INTO packet_queue (entry_id, packet_sha256, status, queued_at, document)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(
+      'entry-1',
+      'packet-entry-1',
+      'QUEUED',
+      '2026-01-15T10:30:00Z',
+      JSON.stringify({
+        entry_id: 'entry-1',
+        feature_id: 'feature-1',
+        target_repository: 'acme/widgets',
+        status: 'QUEUED',
+        queued_at: '2026-01-15T10:30:00Z',
+      }),
+    );
+  database
+    .prepare(
+      'INSERT INTO idea_inbox (idea_id, created_at, document) VALUES (?, ?, ?)',
+    )
+    .run(
+      'idea-1',
+      '2026-05-01T00:00:00.000Z',
+      JSON.stringify({
+        schema_version: 1,
+        idea_id: 'idea-1',
+        operator_id: 'operator-1',
+        classification: 'public',
+        content: 'Build the widget',
+        content_sha256: 'sha-idea-1',
+        created_at: '2026-05-01T00:00:00.000Z',
+        provenance: { origin: 'local-manual' },
+      }),
+    );
+  if (withPlanning) {
+    const planning = database.prepare(
+      `INSERT INTO planning_revisions (idea_id, revision, created_at, content_sha256, kind, content)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    planning.run(
+      'idea-1',
+      1,
+      '2026-05-02T00:00:00.000Z',
+      'sha-plan-1',
+      'plan',
+      '# Plan v1',
+    );
+    planning.run(
+      'idea-1',
+      2,
+      '2026-05-03T00:00:00.000Z',
+      'sha-plan-2',
+      'plan',
+      '# Plan for idea-1',
+    );
+    planning.run(
+      'idea-1',
+      1,
+      '2026-05-04T00:00:00.000Z',
+      'sha-blueprint',
+      'blueprint',
+      JSON.stringify({
+        schema_version: 1,
+        idea_id: 'idea-1',
+        project_id: 'project-1',
+        title: 'Build the widget',
+        repositories: ['acme/widgets'],
+        phases: [
+          {
+            phase_id: 'phase-1',
+            title: 'Phase one',
+            goal: 'Goal',
+            exit: 'Exit',
+            packets: [
+              {
+                feature_id: 'feature-1',
+                repository: 'acme/widgets',
+                title: 'Packet one',
+                outcome: 'Done',
+                writable_paths: ['src'],
+                acceptance_criteria: ['works'],
+                depends_on: [],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+  }
+  return database;
+}
+
 interface RunSourcesOptions {
   directories?: string[];
   fileExists?: (path: string) => boolean;
@@ -161,6 +281,32 @@ function makeQueueSources(
       options.openDatabase ??
       ((path: string) => {
         const database = createQueueDatabase(['entry-1', 'entry-2']);
+        opened.push(database);
+        return database;
+      }),
+  });
+  return { sources, opened };
+}
+
+interface HomeSourcesOptions {
+  exists?: boolean;
+  openDatabase?: (path: string) => DatabaseSync;
+}
+
+function makeHomeSources(
+  options: HomeSourcesOptions = {},
+): { sources: ReadSourcesWithIdeas; opened: DatabaseSync[] } {
+  const opened: DatabaseSync[] = [];
+  const sources = createReadSources({
+    runsRoot: '/state/runs',
+    queuePath: '/state/home.sqlite',
+    listDirectories: () => [],
+    fileExists: (path: string) =>
+      path.endsWith('home.sqlite') && (options.exists ?? true),
+    openDatabase:
+      options.openDatabase ??
+      ((path: string) => {
+        const database = createHomeDatabase();
         opened.push(database);
         return database;
       }),
@@ -256,6 +402,153 @@ describe('createReadSources', () => {
     });
 
     expect(() => sources.listQueueEntries()).toThrow(/entry-bad/);
+    expect(opened.map((database) => database.isOpen)).toEqual([false]);
+  });
+});
+
+describe('createReadSources ideas', () => {
+  it('returns an idea list with plan revision and blueprint totals from the home database', () => {
+    const { sources, opened } = makeHomeSources();
+
+    const ideas = sources.listIdeas();
+
+    expect(ideas.map((entry) => entry.idea.idea_id)).toEqual(['idea-1']);
+    expect(ideas[0]!.plan_revision).toBe(2);
+    expect(ideas[0]!.blueprint).toEqual({
+      revision: 1,
+      totals: {
+        NOT_STARTED: 0,
+        QUEUED: 1,
+        RUNNING: 0,
+        AWAITING_REVIEW: 0,
+        FAILED: 0,
+      },
+    });
+    expect(opened.map((database) => database.isOpen)).toEqual([false]);
+  });
+
+  it('returns [] when the home database does not exist', () => {
+    const { sources } = makeHomeSources({ exists: false });
+
+    expect(sources.listIdeas()).toEqual([]);
+  });
+
+  it('closes the home database even when listIdeas reading throws', () => {
+    const { sources, opened } = makeHomeSources({
+      openDatabase: () => {
+        const database = new DatabaseSync(':memory:');
+        database.exec(
+          'CREATE TABLE idea_inbox (idea_id TEXT PRIMARY KEY, created_at TEXT NOT NULL, document TEXT NOT NULL)',
+        );
+        database
+          .prepare(
+            'INSERT INTO idea_inbox (idea_id, created_at, document) VALUES (?, ?, ?)',
+          )
+          .run('idea-bad', '2026-05-01T00:00:00.000Z', '{not valid json');
+        opened.push(database);
+        return database;
+      },
+    });
+
+    expect(() => sources.listIdeas()).toThrow(/idea-bad/);
+    expect(opened.map((database) => database.isOpen)).toEqual([false]);
+  });
+
+  it('returns the idea, its latest plan and blueprint status from the home database', () => {
+    const { sources, opened } = makeHomeSources();
+
+    const idea = sources.getIdea('idea-1');
+
+    expect(idea).toBeDefined();
+    expect(idea?.idea.idea_id).toBe('idea-1');
+    expect(idea?.plan).toEqual({
+      idea_id: 'idea-1',
+      revision: 2,
+      created_at: '2026-05-03T00:00:00.000Z',
+      content_sha256: 'sha-plan-2',
+      markdown: '# Plan for idea-1',
+    });
+    expect(idea?.blueprint).toEqual({
+      revision: 1,
+      status: {
+        idea_id: 'idea-1',
+        project_id: 'project-1',
+        title: 'Build the widget',
+        phases: [
+          {
+            phase_id: 'phase-1',
+            title: 'Phase one',
+            goal: 'Goal',
+            exit: 'Exit',
+            packets: [
+              expect.objectContaining({
+                feature_id: 'feature-1',
+                status: 'QUEUED',
+                attempts: 1,
+              }),
+            ],
+            counts: {
+              NOT_STARTED: 0,
+              QUEUED: 1,
+              RUNNING: 0,
+              AWAITING_REVIEW: 0,
+              FAILED: 0,
+            },
+          },
+        ],
+        totals: {
+          NOT_STARTED: 0,
+          QUEUED: 1,
+          RUNNING: 0,
+          AWAITING_REVIEW: 0,
+          FAILED: 0,
+        },
+      },
+    });
+    expect(opened.map((database) => database.isOpen)).toEqual([false]);
+  });
+
+  it('returns an idea without plan or blueprint when none are recorded', () => {
+    const { sources } = makeHomeSources({
+      openDatabase: () => createHomeDatabase(false),
+    });
+
+    const idea = sources.getIdea('idea-1');
+    expect(idea?.idea.idea_id).toBe('idea-1');
+    expect(idea?.plan).toBeUndefined();
+    expect(idea?.blueprint).toBeUndefined();
+  });
+
+  it('returns undefined for an unknown idea', () => {
+    const { sources } = makeHomeSources();
+
+    expect(sources.getIdea('idea-missing')).toBeUndefined();
+  });
+
+  it('returns undefined when the home database does not exist', () => {
+    const { sources } = makeHomeSources({ exists: false });
+
+    expect(sources.getIdea('idea-1')).toBeUndefined();
+  });
+
+  it('closes the home database even when getIdea reading throws', () => {
+    const { sources, opened } = makeHomeSources({
+      openDatabase: () => {
+        const database = new DatabaseSync(':memory:');
+        database.exec(
+          'CREATE TABLE idea_inbox (idea_id TEXT PRIMARY KEY, created_at TEXT NOT NULL, document TEXT NOT NULL)',
+        );
+        database
+          .prepare(
+            'INSERT INTO idea_inbox (idea_id, created_at, document) VALUES (?, ?, ?)',
+          )
+          .run('idea-bad', '2026-05-01T00:00:00.000Z', '{not valid json');
+        opened.push(database);
+        return database;
+      },
+    });
+
+    expect(() => sources.getIdea('idea-bad')).toThrow(/idea-bad/);
     expect(opened.map((database) => database.isOpen)).toEqual([false]);
   });
 });
