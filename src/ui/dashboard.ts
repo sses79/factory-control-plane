@@ -131,6 +131,7 @@ th, td {
 </head>
 <body>
 <h1>Factory Control Plane</h1>
+<nav><a href="/ideas">Ideas</a></nav>
 <p>Generated at: ${escapeHtml(input.generatedAt)}</p>
 <h2>Runs</h2>
 <p>${runCountsText}</p>
