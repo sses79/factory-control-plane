@@ -9,6 +9,7 @@ export const PACKET_STATUSES = [
   'QUEUED',
   'RUNNING',
   'AWAITING_REVIEW',
+  'MERGED',
   'FAILED',
 ] as const;
 
@@ -19,6 +20,7 @@ const CountsSchema = z.object({
   QUEUED: z.number().int().nonnegative(),
   RUNNING: z.number().int().nonnegative(),
   AWAITING_REVIEW: z.number().int().nonnegative(),
+  MERGED: z.number().int().nonnegative(),
   FAILED: z.number().int().nonnegative(),
 });
 
@@ -35,6 +37,8 @@ const PacketStatusSchema = z.object({
   pull_request_url: z.string().optional(),
   terminal_reason: z.string().optional(),
   run_state: z.string().optional(),
+  merged_at: z.iso.datetime({ offset: true }).optional(),
+  merge_commit: z.string().regex(/^[0-9a-f]{40}$/).optional(),
 });
 
 type PacketStatusEntry = z.infer<typeof PacketStatusSchema>;
@@ -74,6 +78,7 @@ function emptyCounts(): Counts {
     QUEUED: 0,
     RUNNING: 0,
     AWAITING_REVIEW: 0,
+    MERGED: 0,
     FAILED: 0,
   };
 }
@@ -137,7 +142,9 @@ export function toBlueprintStatus(input: {
         status:
           latest === undefined
             ? 'NOT_STARTED'
-            : QUEUE_STATUS_TO_PACKET_STATUS[latest.status],
+            : latest.status === 'SUCCEEDED' && latest.merged_at !== undefined
+              ? 'MERGED'
+              : QUEUE_STATUS_TO_PACKET_STATUS[latest.status],
         attempts: entries.length,
       };
 
@@ -154,6 +161,12 @@ export function toBlueprintStatus(input: {
         }
         if (latest.terminal_reason !== undefined) {
           result.terminal_reason = latest.terminal_reason;
+        }
+        if (latest.merged_at !== undefined) {
+          result.merged_at = latest.merged_at;
+        }
+        if (latest.merge_commit !== undefined) {
+          result.merge_commit = latest.merge_commit;
         }
       }
 

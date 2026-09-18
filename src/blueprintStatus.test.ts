@@ -275,6 +275,46 @@ describe('toBlueprintStatus', () => {
     expect(findPacket(result, 'f4')?.status).toBe('FAILED');
   });
 
+  it('maps a SUCCEEDED entry with merged_at to MERGED and carries merged_at and merge_commit', () => {
+    const queue = makeQueue();
+    queue[0] = {
+      entry_id: 'e1',
+      feature_id: 'f1',
+      target_repository: 'repo-a',
+      status: 'SUCCEEDED',
+      queued_at: '2026-01-01T00:00:00Z',
+      run_id: 'run-1',
+      pull_request_url: 'https://github.com/example/control-plane/pull/1',
+      merged_at: '2026-01-02T00:00:00Z',
+      merge_commit: '0'.repeat(40),
+    };
+
+    const result = toBlueprintStatus({
+      blueprint: makeBlueprint(),
+      queue,
+      runs: makeRuns(),
+    });
+
+    const packet = findPacket(result, 'f1');
+    expect(packet?.status).toBe('MERGED');
+    expect(packet?.merged_at).toBe('2026-01-02T00:00:00Z');
+    expect(packet?.merge_commit).toBe('0'.repeat(40));
+    expect(BlueprintStatusSchema.parse(result)).toEqual(result);
+
+    const phaseA = result.phases.find((phase) => phase.phase_id === 'phase-a');
+    expect(phaseA?.counts).toMatchObject({
+      AWAITING_REVIEW: 0,
+      MERGED: 1,
+    });
+  });
+
+  it('keeps a SUCCEEDED entry without merged_at at AWAITING_REVIEW', () => {
+    const packet = findPacket(buildStatus(), 'f1');
+    expect(packet?.status).toBe('AWAITING_REVIEW');
+    expect(packet?.merged_at).toBeUndefined();
+    expect(packet?.merge_commit).toBeUndefined();
+  });
+
   it('prefers a later SUCCEEDED entry over an earlier FAILED entry', () => {
     const packet = findPacket(buildStatus(), 'f6');
     expect(packet?.status).toBe('AWAITING_REVIEW');
@@ -366,6 +406,7 @@ describe('toBlueprintStatus', () => {
       QUEUED: 1,
       RUNNING: 1,
       AWAITING_REVIEW: 1,
+      MERGED: 0,
       FAILED: 1,
     });
     expect(result.phases[1]?.counts).toEqual({
@@ -373,6 +414,7 @@ describe('toBlueprintStatus', () => {
       QUEUED: 1,
       RUNNING: 0,
       AWAITING_REVIEW: 1,
+      MERGED: 0,
       FAILED: 0,
     });
     expect(result.totals).toEqual({
@@ -380,6 +422,7 @@ describe('toBlueprintStatus', () => {
       QUEUED: 2,
       RUNNING: 1,
       AWAITING_REVIEW: 2,
+      MERGED: 0,
       FAILED: 1,
     });
   });

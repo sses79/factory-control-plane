@@ -104,6 +104,7 @@ const blueprintStatus: BlueprintStatus = {
     QUEUED: 1,
     RUNNING: 0,
     AWAITING_REVIEW: 0,
+    MERGED: 0,
     FAILED: 0,
   },
 };
