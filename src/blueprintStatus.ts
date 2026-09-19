@@ -107,6 +107,21 @@ function latestQueueEntry(
   return latest;
 }
 
+function latestMergedEntry(
+  entries: readonly QueueEntry[],
+): QueueEntry | undefined {
+  let latest: QueueEntry | undefined;
+  for (const entry of entries) {
+    if (entry.status !== 'SUCCEEDED' || entry.merged_at === undefined) {
+      continue;
+    }
+    if (latest === undefined || compareLatestEntry(entry, latest) > 0) {
+      latest = entry;
+    }
+  }
+  return latest;
+}
+
 export function toBlueprintStatus(input: {
   blueprint: Blueprint;
   queue: QueueEntry[];
@@ -132,7 +147,7 @@ export function toBlueprintStatus(input: {
   const phases = input.blueprint.phases.map((phase) => {
     const packets = phase.packets.map((packet) => {
       const entries = entriesByFeature.get(packet.feature_id) ?? [];
-      const latest = latestQueueEntry(entries);
+      const latest = latestMergedEntry(entries) ?? latestQueueEntry(entries);
 
       const result: PacketStatusEntry = {
         feature_id: packet.feature_id,
