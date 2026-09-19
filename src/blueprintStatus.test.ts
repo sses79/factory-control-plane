@@ -308,6 +308,123 @@ describe('toBlueprintStatus', () => {
     });
   });
 
+  it('reports the merged entry when a merged SUCCEEDED entry ties queued_at with a FAILED entry', () => {
+    const queue = makeQueue();
+    queue[0] = {
+      entry_id: 'e1a',
+      feature_id: 'f1',
+      target_repository: 'repo-a',
+      status: 'SUCCEEDED',
+      queued_at: '2026-01-01T00:00:00Z',
+      run_id: 'run-1',
+      pull_request_url: 'https://github.com/example/control-plane/pull/1',
+      merged_at: '2026-01-02T00:00:00Z',
+      merge_commit: '0'.repeat(40),
+    };
+    queue.push({
+      entry_id: 'e1b',
+      feature_id: 'f1',
+      target_repository: 'repo-a',
+      status: 'FAILED',
+      queued_at: '2026-01-01T00:00:00Z',
+      run_id: 'run-1b',
+      terminal_reason: 'Acceptance criteria failed',
+    });
+
+    const result = toBlueprintStatus({
+      blueprint: makeBlueprint(),
+      queue,
+      runs: makeRuns(),
+    });
+
+    const packet = findPacket(result, 'f1');
+    expect(packet?.status).toBe('MERGED');
+    expect(packet?.attempts).toBe(2);
+    expect(packet?.run_id).toBe('run-1');
+    expect(packet?.pull_request_url).toBe(
+      'https://github.com/example/control-plane/pull/1',
+    );
+    expect(packet?.terminal_reason).toBeUndefined();
+  });
+
+  it('reports the merged entry even when a later FAILED entry has a terminal_reason', () => {
+    const queue = makeQueue();
+    queue[0] = {
+      entry_id: 'e1a',
+      feature_id: 'f1',
+      target_repository: 'repo-a',
+      status: 'SUCCEEDED',
+      queued_at: '2026-01-01T00:00:00Z',
+      run_id: 'run-1',
+      pull_request_url: 'https://github.com/example/control-plane/pull/1',
+      merged_at: '2026-01-02T00:00:00Z',
+      merge_commit: '0'.repeat(40),
+    };
+    queue.push({
+      entry_id: 'e1b',
+      feature_id: 'f1',
+      target_repository: 'repo-a',
+      status: 'FAILED',
+      queued_at: '2026-01-08T00:00:00Z',
+      run_id: 'run-1b',
+      terminal_reason: 'Queue base stale',
+    });
+
+    const result = toBlueprintStatus({
+      blueprint: makeBlueprint(),
+      queue,
+      runs: makeRuns(),
+    });
+
+    const packet = findPacket(result, 'f1');
+    expect(packet?.status).toBe('MERGED');
+    expect(packet?.attempts).toBe(2);
+    expect(packet?.run_id).toBe('run-1');
+    expect(packet?.terminal_reason).toBeUndefined();
+  });
+
+  it('reports the latest of several merged entries', () => {
+    const queue = makeQueue();
+    queue[0] = {
+      entry_id: 'e1a',
+      feature_id: 'f1',
+      target_repository: 'repo-a',
+      status: 'SUCCEEDED',
+      queued_at: '2026-01-01T00:00:00Z',
+      run_id: 'run-1',
+      pull_request_url: 'https://github.com/example/control-plane/pull/1',
+      merged_at: '2026-01-02T00:00:00Z',
+      merge_commit: '0'.repeat(40),
+    };
+    queue.push({
+      entry_id: 'e1b',
+      feature_id: 'f1',
+      target_repository: 'repo-a',
+      status: 'SUCCEEDED',
+      queued_at: '2026-01-03T00:00:00Z',
+      run_id: 'run-1b',
+      pull_request_url: 'https://github.com/example/control-plane/pull/2',
+      merged_at: '2026-01-04T00:00:00Z',
+      merge_commit: '1'.repeat(40),
+    });
+
+    const result = toBlueprintStatus({
+      blueprint: makeBlueprint(),
+      queue,
+      runs: makeRuns(),
+    });
+
+    const packet = findPacket(result, 'f1');
+    expect(packet?.status).toBe('MERGED');
+    expect(packet?.attempts).toBe(2);
+    expect(packet?.run_id).toBe('run-1b');
+    expect(packet?.pull_request_url).toBe(
+      'https://github.com/example/control-plane/pull/2',
+    );
+    expect(packet?.merged_at).toBe('2026-01-04T00:00:00Z');
+    expect(packet?.merge_commit).toBe('1'.repeat(40));
+  });
+
   it('keeps a SUCCEEDED entry without merged_at at AWAITING_REVIEW', () => {
     const packet = findPacket(buildStatus(), 'f1');
     expect(packet?.status).toBe('AWAITING_REVIEW');
